@@ -4,7 +4,9 @@ version = "0.1.0"
 description = "Natural-language questions over synthetic procurement data, answered with safe read-only SQL."
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
-dependencies = []
+dependencies = [
+    "psycopg[binary]>=3.3.6",
+]
 
 [build-system]
 requires = ["uv_build>=0.12,<0.13"]
@@ -15,6 +17,7 @@ module-name = "assistant"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]
 markers = [
     "integration: needs the compose database (docker compose -f docker-compose.yml -f compose.dev.yml up -d db)",
 ]

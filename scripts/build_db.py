@@ -1,27 +1,32 @@
-"""Generate a fully synthetic procurement database (SQLite).
+"""Generate a fully synthetic procurement database (PostgreSQL).
 
 Everything here is fictional: supplier names, prices, carts, contracts.
-The data is deterministic (fixed seed) and uses only the standard library.
+The data is deterministic (fixed seed); random draws use only the standard library.
 
-Usage (from the repo root):
-    python scripts/build_db.py                # writes data/suppliers.db
+Usage (from the repo root; `make dump` runs it against a throwaway container):
+    python scripts/build_db.py --dsn postgresql://postgres:build@127.0.0.1:55433/procurement_build
     python scripts/build_db.py --seed 7       # different (but reproducible) data
-    python scripts/build_db.py --out path/to/suppliers.db
 
-Warning: the output file is deleted and rebuilt.
+The DSN can also come from BUILD_DATABASE_URL. Only databases named in TARGET_DATABASES
+are accepted.
+
+Warning: the generator's tables in the target database are dropped and rebuilt.
 """
 import argparse
 import math
+import os
 import random
-import sqlite3
 from datetime import date, timedelta
-from pathlib import Path
+
+import psycopg
+from psycopg.conninfo import conninfo_to_dict
 
 AS_OF = date(2026, 10, 3)  # "today" inside the dataset
 DATA_START = date(2023, 1, 2)
 DATA_END = date(2026, 9, 30)
 
-DEFAULT_OUT = Path(__file__).resolve().parent.parent / "data" / "suppliers.db"
+# The script drops tables, so it only writes to scratch databases built for that purpose.
+TARGET_DATABASES = {"procurement_build"}
 
 # --------------------------------------------------------------------------- #
 # Reference data
@@ -225,14 +230,17 @@ SPEC_SUFFIXES = ["PK 10", "SET", "1 PC", "BULK", "- NEW", "(REPLACEMENT)", "2 PA
 # Schema
 # --------------------------------------------------------------------------- #
 
-SCHEMA = """
-PRAGMA foreign_keys = ON;
+TABLES = [
+    "meta", "exchange_rates", "plants", "categories", "suppliers", "supplier_aliases",
+    "contracts", "catalog_items", "shopping_carts", "shopping_cart_items",
+]
 
+SCHEMA = """
 CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 
 CREATE TABLE exchange_rates (
     currency    TEXT PRIMARY KEY,
-    rate_to_eur REAL NOT NULL
+    rate_to_eur NUMERIC(10,4) NOT NULL
 );
 
 CREATE TABLE plants (
@@ -257,9 +265,9 @@ CREATE TABLE suppliers (
     currency           TEXT NOT NULL REFERENCES exchange_rates(currency),
     status             TEXT NOT NULL CHECK (status IN ('active','inactive','blocked')),
     risk_rating        TEXT NOT NULL CHECK (risk_rating IN ('low','medium','high')),
-    is_preferred       INTEGER NOT NULL CHECK (is_preferred IN (0,1)),
+    is_preferred       BOOLEAN NOT NULL,
     payment_terms_days INTEGER NOT NULL,
-    onboarded_at       TEXT NOT NULL
+    onboarded_at       DATE NOT NULL
 );
 
 CREATE TABLE supplier_aliases (
@@ -273,9 +281,9 @@ CREATE TABLE contracts (
     supplier_id  INTEGER NOT NULL REFERENCES suppliers(supplier_id),
     category_id  INTEGER NOT NULL REFERENCES categories(category_id),
     status       TEXT NOT NULL CHECK (status IN ('published','draft','expired','terminated')),
-    start_date   TEXT NOT NULL,
-    end_date     TEXT NOT NULL,
-    discount_pct REAL NOT NULL
+    start_date   DATE NOT NULL,
+    end_date     DATE NOT NULL,
+    discount_pct NUMERIC(4,1) NOT NULL
 );
 
 CREATE TABLE catalog_items (
@@ -286,36 +294,36 @@ CREATE TABLE catalog_items (
     sku              TEXT NOT NULL,
     item_name        TEXT NOT NULL,
     item_description TEXT,
-    unit_price       REAL NOT NULL,
+    unit_price       NUMERIC(14,2) NOT NULL,
     currency         TEXT NOT NULL REFERENCES exchange_rates(currency),
-    active           INTEGER NOT NULL CHECK (active IN (0,1)),
-    created_at       TEXT NOT NULL
+    active           BOOLEAN NOT NULL,
+    created_at       DATE NOT NULL
 );
 
 CREATE TABLE shopping_carts (
-    cart_id               INTEGER PRIMARY KEY,
+    cart_id               BIGINT PRIMARY KEY,
     description           TEXT NOT NULL,
     plant_id              INTEGER NOT NULL REFERENCES plants(plant_id),
     requester_department  TEXT NOT NULL,
     status                TEXT NOT NULL CHECK (status IN ('completed','cancelled','rejected','in_approval')),
-    created_at            TEXT NOT NULL,
-    completed_at          TEXT
+    created_at            DATE NOT NULL,
+    completed_at          DATE
 );
 
 CREATE TABLE shopping_cart_items (
     line_id         INTEGER PRIMARY KEY,
-    cart_id         INTEGER NOT NULL REFERENCES shopping_carts(cart_id),
+    cart_id         BIGINT NOT NULL REFERENCES shopping_carts(cart_id),
     supplier_id     INTEGER NOT NULL REFERENCES suppliers(supplier_id),
     category_id     INTEGER REFERENCES categories(category_id),
     contract_id     TEXT REFERENCES contracts(contract_id),
     item_description TEXT NOT NULL,
     quantity        INTEGER NOT NULL,
-    unit_price      REAL NOT NULL,
-    total_value     REAL NOT NULL,
+    unit_price      NUMERIC(14,2) NOT NULL,
+    total_value     NUMERIC(14,2) NOT NULL,
     currency        TEXT NOT NULL REFERENCES exchange_rates(currency),
     promised_days   INTEGER,
     actual_days     INTEGER,
-    created_at      TEXT NOT NULL
+    created_at      DATE NOT NULL
 );
 """
 
@@ -421,16 +429,15 @@ def inflation(d):
 # --------------------------------------------------------------------------- #
 
 
-def build(db_path, seed):
+def build(conn, seed):
     rng = random.Random(seed)
 
-    if db_path.exists():
-        db_path.unlink()
-    conn = sqlite3.connect(db_path)
-    conn.executescript(SCHEMA)
+    cur = conn.cursor()
+    cur.execute(f"DROP TABLE IF EXISTS {', '.join(TABLES)} CASCADE")
+    cur.execute(SCHEMA)
 
-    conn.executemany("INSERT INTO exchange_rates VALUES (?,?)", FX_TO_EUR.items())
-    conn.executemany("INSERT INTO plants VALUES (?,?,?,?)", PLANTS)
+    cur.executemany("INSERT INTO exchange_rates VALUES (%s,%s)", FX_TO_EUR.items())
+    cur.executemany("INSERT INTO plants VALUES (%s,%s,%s,%s)", PLANTS)
 
     # ---- categories -------------------------------------------------------
     group_ids = {}
@@ -445,7 +452,7 @@ def build(db_path, seed):
         cat_ids[key] = cid
         cat_rows.append((cid, name, code, group_ids[group]))
         cid += 1
-    conn.executemany("INSERT INTO categories VALUES (?,?,?,?)", cat_rows)
+    cur.executemany("INSERT INTO categories VALUES (%s,%s,%s,%s)", cat_rows)
     cat_keys = list(CATEGORIES.keys())
 
     # ---- suppliers --------------------------------------------------------
@@ -542,10 +549,10 @@ def build(db_path, seed):
 
     for i, s in enumerate(suppliers, start=1):
         s["id"] = i
-    conn.executemany(
-        "INSERT INTO suppliers VALUES (?,?,?,?,?,?,?,?,?,?)",
+    cur.executemany(
+        "INSERT INTO suppliers VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
         [(s["id"], s["name"], s["country"], s["city"], s["currency"], s["status"], s["risk"],
-          s["preferred"], s["terms"], iso(s["onboarded"])) for s in suppliers],
+          bool(s["preferred"]), s["terms"], iso(s["onboarded"])) for s in suppliers],
     )
 
     # aliases (sister entities share the brand alias -> ambiguous on purpose)
@@ -561,7 +568,7 @@ def build(db_path, seed):
         for a in sorted(aliases):  # sorted: set order depends on PYTHONHASHSEED
             alias_rows.append((aid, s["id"], a))
             aid += 1
-    conn.executemany("INSERT INTO supplier_aliases VALUES (?,?,?)", alias_rows)
+    cur.executemany("INSERT INTO supplier_aliases VALUES (%s,%s,%s)", alias_rows)
 
     sup_by_cat = {k: [s for s in suppliers if k in s["cats"]] for k in cat_keys}
 
@@ -603,8 +610,8 @@ def build(db_path, seed):
                 dstart = rand_date(rng, date(2026, 11, 1), date(2027, 3, 31))
                 add_contract(s, key, dstart, dstart + timedelta(days=730), round(rng.uniform(0, 15), 1))
 
-    conn.executemany(
-        "INSERT INTO contracts VALUES (?,?,?,?,?,?,?)",
+    cur.executemany(
+        "INSERT INTO contracts VALUES (%s,%s,%s,%s,%s,%s,%s)",
         [(c["id"], c["sid"], cat_ids[c["cat"]], c["status"], iso(c["start"]), iso(c["end"]), c["disc"]) for c in contracts],
     )
     contracts_by = {}
@@ -639,10 +646,10 @@ def build(db_path, seed):
                 created = rand_date(rng, max(DATA_START, s["active_from"]), DATA_END) if s["active_from"] < DATA_END else DATA_END
                 catalog_rows.append((
                     cat_item_id, s["id"], latest["id"] if latest else None, cat_ids[key], sku,
-                    name, desc, round(price_eur / rate, 2), s["currency"], active, iso(created),
+                    name, desc, round(price_eur / rate, 2), s["currency"], bool(active), iso(created),
                 ))
                 cat_item_id += 1
-    conn.executemany("INSERT INTO catalog_items VALUES (?,?,?,?,?,?,?,?,?,?,?)", catalog_rows)
+    cur.executemany("INSERT INTO catalog_items VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)", catalog_rows)
 
     # ---- carts & lines ----------------------------------------------------
     n_carts = 7200
@@ -739,32 +746,46 @@ def build(db_path, seed):
             ))
             line_id += 1
 
-    conn.executemany("INSERT INTO shopping_carts VALUES (?,?,?,?,?,?,?)", cart_rows)
-    conn.executemany("INSERT INTO shopping_cart_items VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)", line_rows)
+    cur.executemany("INSERT INTO shopping_carts VALUES (%s,%s,%s,%s,%s,%s,%s)", cart_rows)
+    cur.executemany("INSERT INTO shopping_cart_items VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)", line_rows)
 
-    conn.executescript(POST_SCHEMA)
+    cur.execute(POST_SCHEMA)
     meta = {
         "as_of_date": iso(AS_OF), "data_from": iso(DATA_START), "data_to": iso(DATA_END),
         "seed": str(seed), "note": "Fully synthetic data. All names are fictional.",
     }
-    conn.executemany("INSERT INTO meta VALUES (?,?)", meta.items())
+    cur.executemany("INSERT INTO meta VALUES (%s,%s)", meta.items())
     conn.commit()
 
-    counts = {t: conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0] for t in
+    counts = {t: cur.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0] for t in
               ["suppliers", "supplier_aliases", "categories", "contracts", "catalog_items",
                "shopping_carts", "shopping_cart_items", "plants", "exchange_rates"]}
-    conn.close()
     return counts
+
+
+def target_database(dsn):
+    """Return the database name in `dsn`, or raise if it is not an allowed build target."""
+    dbname = conninfo_to_dict(dsn).get("dbname")
+    if dbname not in TARGET_DATABASES:
+        raise ValueError(f"refusing to build into {dbname!r}; allowed: {sorted(TARGET_DATABASES)}")
+    return dbname
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--out", type=Path, default=DEFAULT_OUT)
+    parser.add_argument("--dsn", default=os.environ.get("BUILD_DATABASE_URL"),
+                        help="target database (default: $BUILD_DATABASE_URL)")
     args = parser.parse_args()
-    args.out.parent.mkdir(parents=True, exist_ok=True)
-    counts = build(args.out, args.seed)
-    print(f"Wrote {args.out} (seed={args.seed})")
+    if not args.dsn:
+        parser.error("no target: pass --dsn or set BUILD_DATABASE_URL")
+    try:
+        dbname = target_database(args.dsn)
+    except ValueError as exc:
+        parser.error(str(exc))
+    with psycopg.connect(args.dsn) as conn:
+        counts = build(conn, args.seed)
+    print(f"Wrote database {dbname} (seed={args.seed})")
     for table, n in counts.items():
         print(f"  {table:22s} {n:>7,}")
 

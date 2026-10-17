@@ -1,0 +1,66 @@
+"""The generator, run without a database through a recording connection."""
+
+import json
+import os
+import subprocess
+import sys
+
+import pytest
+
+from tests.build_recorder import REPO_ROOT, load_build_module, record
+
+RECORDER = REPO_ROOT / "tests" / "build_recorder.py"
+
+
+@pytest.fixture(scope="module")
+def recorded():
+    return record()
+
+
+def fingerprint_in_subprocess(hashseed: str) -> dict:
+    env = {**os.environ, "PYTHONHASHSEED": hashseed}
+    out = subprocess.run(
+        [sys.executable, str(RECORDER)], env=env, check=True, capture_output=True, text=True
+    )
+    return json.loads(out.stdout)
+
+
+def test_data_does_not_depend_on_python_hash_seed():
+    assert fingerprint_in_subprocess("0") == fingerprint_in_subprocess("1")
+
+
+def test_every_table_is_written(recorded):
+    assert set(recorded.tables) == set(load_build_module().TABLES)
+
+
+def test_booleans_are_real_booleans(recorded):
+    is_preferred = {row[7] for row in recorded.tables["suppliers"]}
+    active = {row[9] for row in recorded.tables["catalog_items"]}
+    assert is_preferred == {True, False}
+    assert active == {True, False}
+
+
+def test_tables_are_dropped_before_the_schema_is_created(recorded):
+    assert recorded.statements[0].startswith("DROP TABLE IF EXISTS meta, ")
+    assert "CREATE TABLE" in recorded.statements[1]
+
+
+@pytest.mark.parametrize(
+    "dsn",
+    [
+        "postgresql://postgres:x@127.0.0.1:55433/procurement",
+        "postgresql://postgres:x@127.0.0.1:55433/postgres",
+        "host=127.0.0.1 dbname=procurement_build_old",
+        "postgresql://127.0.0.1:55433",
+    ],
+)
+def test_only_allowlisted_databases_are_build_targets(dsn):
+    with pytest.raises(ValueError, match="refusing to build"):
+        load_build_module().target_database(dsn)
+
+
+def test_build_database_is_accepted():
+    build = load_build_module()
+    assert build.target_database("postgresql://u:p@127.0.0.1:1/procurement_build") == (
+        "procurement_build"
+    )
