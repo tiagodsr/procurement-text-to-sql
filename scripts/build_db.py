@@ -297,7 +297,8 @@ CREATE TABLE catalog_items (
     unit_price       NUMERIC(14,2) NOT NULL,
     currency         TEXT NOT NULL REFERENCES exchange_rates(currency),
     active           BOOLEAN NOT NULL,
-    created_at       DATE NOT NULL
+    created_at       DATE NOT NULL,
+    lead_time_days   INTEGER NOT NULL
 );
 
 CREATE TABLE shopping_carts (
@@ -642,14 +643,16 @@ def build(conn, seed):
                 sku = f"{s['base'][:3].upper()}-{rng.randint(10000, 99999)}"
                 active_p = 0.92 if (latest and latest["status"] == "published") else 0.55
                 active = int(s["status"] == "active" and rng.random() < active_p)
-                desc = f"{name} | SKU {sku} | lead time {rng.randint(2, 21)} days"
+                lead_time = rng.randint(2, 21)
+                desc = f"{name} | SKU {sku} | lead time {lead_time} days"
                 created = rand_date(rng, max(DATA_START, s["active_from"]), DATA_END) if s["active_from"] < DATA_END else DATA_END
                 catalog_rows.append((
                     cat_item_id, s["id"], latest["id"] if latest else None, cat_ids[key], sku,
                     name, desc, round(price_eur / rate, 2), s["currency"], bool(active), iso(created),
+                    lead_time,
                 ))
                 cat_item_id += 1
-    cur.executemany("INSERT INTO catalog_items VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)", catalog_rows)
+    cur.executemany("INSERT INTO catalog_items VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)", catalog_rows)
 
     # ---- carts & lines ----------------------------------------------------
     n_carts = 7200

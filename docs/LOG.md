@@ -66,3 +66,12 @@ stored as 111.73499... in a float); that adds up to at most 0.15 in `spend_eur` 
 one `avg_delay_days` differs by 0.01. PostgreSQL is the correct one. Consequence for Step 4: every
 expected value is re-measured on PostgreSQL; the SQLite numbers in the golden-set guide are not
 reused as they are.
+
+**`catalog_items.lead_time_days`.** The generator already drew a lead time per catalog item
+(`rng.randint(2, 21)`), but only wrote it into the free text of `item_description`. The draw is now
+bound to a variable at the same position and also stored as an `INTEGER NOT NULL` column (the last
+one), so lead-time questions need no string parsing. The draw order is unchanged, so every other
+value stays as it was: the parity check, which reads only the SQLite columns, must still pass.
+Parity re-run after adding the column (2026-10-17 17:00): all ten tables still identical on the
+SQLite columns (same checksums as above); in PostgreSQL, `item_description` ends with
+`lead time <lead_time_days> days` for all 522 items, range 2 to 21.

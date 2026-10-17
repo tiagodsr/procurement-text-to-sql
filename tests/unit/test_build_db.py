@@ -40,6 +40,15 @@ def test_booleans_are_real_booleans(recorded):
     assert active == {True, False}
 
 
+def test_lead_time_column_equals_the_value_in_the_description(recorded):
+    items = recorded.tables["catalog_items"]
+    assert items
+    for item in items:
+        description, lead_time_days = item[6], item[11]
+        assert description.endswith(f"| lead time {lead_time_days} days")
+        assert 2 <= lead_time_days <= 21
+
+
 def test_tables_are_dropped_before_the_schema_is_created(recorded):
     assert recorded.statements[0].startswith("DROP TABLE IF EXISTS meta, ")
     assert "CREATE TABLE" in recorded.statements[1]
