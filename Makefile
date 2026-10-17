@@ -20,3 +20,20 @@ build-db-stop:
 
 parity: build-db  ## one-off: compare the PostgreSQL build with .local/sqlite_reference.db
 	uv run python scripts/parity_check.py --sqlite .local/sqlite_reference.db --pg $(BUILD_DSN)
+
+# pg_dump and gzip run inside the container, so the bytes do not depend on the host's tools.
+# A fixed --restrict-key keeps the dump byte-identical between runs (the default key is random).
+dump: build-db  ## regenerate data/init/01_dump.sql.gz and data/fingerprint.json
+	docker exec $(BUILD_CONTAINER) sh -c 'pg_dump -U postgres -d $(BUILD_DB) --no-owner \
+		--no-privileges --restrict-key=procurementv1 | gzip -n -9' > data/init/01_dump.sql.gz
+	uv run python scripts/freeze_data.py --pg $(BUILD_DSN) --dump data/init/01_dump.sql.gz
+	$(MAKE) build-db-stop
+
+test:  ## unit tests (no database, no API key)
+	uv run pytest -q -m "not integration"
+
+db-dev:  ## compose db with the dev-only loopback port 127.0.0.1:55432
+	$(DEV_COMPOSE) up -d --wait db
+
+test-integration: db-dev  ## integration tests against the compose db, as app_ro
+	uv run pytest -q -m integration

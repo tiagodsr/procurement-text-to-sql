@@ -75,3 +75,46 @@ value stays as it was: the parity check, which reads only the SQLite columns, mu
 Parity re-run after adding the column (2026-10-17 17:00): all ten tables still identical on the
 SQLite columns (same checksums as above); in PostgreSQL, `item_description` ends with
 `lead time <lead_time_days> days` for all 522 items, range 2 to 21.
+
+**Freeze (`scripts/freeze_data.py`, run by `make dump`).** Writes `data/fingerprint.json`, the
+manifest of the frozen data. Inputs: the build DSN and the dump file; output: data version (`v1`),
+seed, `as_of_date`, overall fingerprint, rows and SHA-256 per table and per view, and the SHA-256 of
+`01_dump.sql.gz`. It lives outside `data/init/` so the database entrypoint ignores it. Tests compare
+the generator, the committed dump and the loaded database with this one file; Step 4 copies the
+fingerprint into `evals/golden_set.json`. No timestamp is written, so re-running `make dump` on
+unchanged data leaves the file byte-identical.
+
+**Read-only role (`data/init/02_roles.sql`).** Runs once, after the dump, on the first start of the
+`db` container. It creates `app_ro`: login, no superuser or create rights, `SELECT` on every table
+and view in `public` and nothing else. PUBLIC loses `CREATE` on the schema and `TEMP`/`CONNECT` on
+the database, so the role cannot create even a temporary table. Role defaults:
+`default_transaction_read_only = on`, `statement_timeout = 5s`,
+`idle_in_transaction_session_timeout = 30s`. The read-only default can be switched off by a session,
+which is why the privileges, not the default, are the real barrier; the guard (Step 3) is a separate,
+independent layer. The password `app_ro_local` is a documented local default: the base Compose file
+never publishes the port and the role can only read.
+
+**Compose (`docker-compose.yml`, `compose.dev.yml`).** One `db` service on the pinned image; the
+committed `data/init/` is mounted read-only as `/docker-entrypoint-initdb.d`, so the first start
+loads the dump and the role script (no seed service, no generator at runtime). The healthcheck uses
+`pg_isready` over TCP, which only succeeds after the init scripts finish. No port is published.
+`compose.dev.yml` adds `127.0.0.1:55432` for host-side integration tests and exploration only.
+
+**Frozen data v1 (2026-10-17 18:20).** `make dump` twice gave the same bytes (dump SHA-256
+`3341d5af...`, 583 KB). Overall fingerprint `ed9d9527...` (after `lead_time_days`); the generator, the
+committed dump and the loaded Compose database all reproduce it (unit and integration tests).
+A fresh `docker compose up -d --wait db` loads it and reports healthy in about 10 s.
+
+Findings while testing, for later steps:
+- A non-owner's `GRANT` is only a warning in PostgreSQL, not an error, so the role test checks that
+  nothing was granted instead of expecting an exception. The security suite (Step 3) must do the same.
+- `information_schema.table_constraints` hides constraints from a SELECT-only role; schema
+  introspection for `app_ro` (for example `GET /v1/schema`) must use `pg_catalog`.
+- Inside the container, `psql -U app_ro` over the Unix socket needs no password (the image trusts
+  local socket connections). Over TCP the password is required (tested).
+- Golden-set probes re-run on PostgreSQL: every snapshot figure matches except two. The `laptop`
+  counts in the old guide were over all lines, not completed lines (124/416/9 on completed lines),
+  and the runner-up 2025 spend is 979,605.76 (SQLite float rounding gave .75). `notebook` also
+  matches the office item "Notebook A5 lined", a trap worth a case in Step 4.
+
+Step 1 finished at 18:35, 2 h 30 min of the 4 h time box. No fallback to SQLite needed.

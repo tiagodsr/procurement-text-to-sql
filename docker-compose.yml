@@ -1,0 +1,27 @@
+name: procurement-text-to-sql
+
+services:
+  db:
+    image: postgres:16.15-bookworm
+    environment:
+      POSTGRES_DB: procurement
+      POSTGRES_USER: postgres
+      # Local admin password, used only by the init scripts. Override it in .env.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres_local}
+    volumes:
+      # First start only: 01_dump.sql.gz (data), then 02_roles.sql (app_ro).
+      - ./data/init:/docker-entrypoint-initdb.d:ro
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      # Over TCP, so it only passes once the init scripts have finished.
+      test: ["CMD-SHELL", "pg_isready -q -h 127.0.0.1 -U postgres -d procurement"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+    restart: unless-stopped
+    # No ports: the database is reachable only on the compose network.
+    # compose.dev.yml adds a loopback port for host-side tests.
+
+volumes:
+  db-data:

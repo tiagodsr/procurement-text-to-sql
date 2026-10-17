@@ -1,12 +1,15 @@
 """The generator, run without a database through a recording connection."""
 
+import hashlib
 import json
 import os
 import subprocess
 import sys
+from dataclasses import asdict
 
 import pytest
 
+from assistant.fingerprint import fingerprint
 from tests.build_recorder import REPO_ROOT, load_build_module, record
 
 RECORDER = REPO_ROOT / "tests" / "build_recorder.py"
@@ -25,8 +28,28 @@ def fingerprint_in_subprocess(hashseed: str) -> dict:
     return json.loads(out.stdout)
 
 
-def test_data_does_not_depend_on_python_hash_seed():
-    assert fingerprint_in_subprocess("0") == fingerprint_in_subprocess("1")
+@pytest.fixture(scope="module")
+def manifest():
+    return json.loads((REPO_ROOT / "data" / "fingerprint.json").read_text())
+
+
+def test_data_does_not_depend_on_python_hash_seed(manifest):
+    first, second = fingerprint_in_subprocess("0"), fingerprint_in_subprocess("1")
+    assert first == second
+    assert first["overall"] == manifest["fingerprint"]
+
+
+def test_generator_reproduces_the_frozen_data(recorded, manifest):
+    """Any change to the generator, even the order of draws, changes the data. Then bump
+    DATA_VERSION, run `make dump` and re-verify the golden set."""
+    current = fingerprint(recorded.tables)
+    assert {n: asdict(s) for n, s in current.tables.items()} == manifest["tables"]
+    assert current.overall == manifest["fingerprint"]
+
+
+def test_committed_dump_is_the_one_in_the_manifest(manifest):
+    dump = REPO_ROOT / manifest["dump"]["file"]
+    assert hashlib.sha256(dump.read_bytes()).hexdigest() == manifest["dump"]["sha256"]
 
 
 def test_every_table_is_written(recorded):

@@ -1,0 +1,62 @@
+{
+  "data_version": "v1",
+  "seed": 42,
+  "as_of_date": "2026-10-03",
+  "fingerprint": "ed9d95272ce8d512daa93062ceab37b920ec4fe996378422a039019984cfc501",
+  "tables": {
+    "catalog_items": {
+      "rows": 522,
+      "sha256": "e8a60259c30c41e7e0c0ef61a43899381978395b203ced2fecf703a3dbd37008"
+    },
+    "categories": {
+      "rows": 16,
+      "sha256": "39da78f43961f194e29ded7bb31103c7a3f0ad7d950d23bb6f6d3c829aa7b1bb"
+    },
+    "contracts": {
+      "rows": 117,
+      "sha256": "5ac097c858ec764b511ba9bfd6a123996e652bbda97e72ad2824eaa597358ffe"
+    },
+    "exchange_rates": {
+      "rows": 7,
+      "sha256": "82f452925ba2cede138e32e21e5b96fdbf20f4dadcc45ea49d811fcf8c58a593"
+    },
+    "meta": {
+      "rows": 5,
+      "sha256": "b1531fe8abb761bd3021b7ac1d796ab0327ea9135a7e84ebd608df340fa11b00"
+    },
+    "plants": {
+      "rows": 8,
+      "sha256": "f9d3c58d39ee7a9552a471e921d00b653f3cdf198d7bfc6804c2c9e3a21f2d63"
+    },
+    "shopping_cart_items": {
+      "rows": 17160,
+      "sha256": "7d8631eefe5df8eb707d840170f1199378c508e0b301fe69a59ad346be433bbb"
+    },
+    "shopping_carts": {
+      "rows": 7200,
+      "sha256": "935842429c629ba89a0826e9fcc900a5677fb299a1563712b8ab5e04704d6a10"
+    },
+    "supplier_aliases": {
+      "rows": 81,
+      "sha256": "4b6bc1306a5187b48df2eb781fc4f33bdc968f887a3df5f8bea88ec1ae768e14"
+    },
+    "suppliers": {
+      "rows": 96,
+      "sha256": "aafff03a5187677763d9012093395a2fc219fb92d98e8649d6c8b5d87f31e331"
+    }
+  },
+  "views": {
+    "v_completed_lines": {
+      "rows": 14926,
+      "sha256": "e659de9920431dea03e3189b84fabd2a5184da123445887fdff0e53ecbfc5d51"
+    },
+    "v_supplier_summary": {
+      "rows": 96,
+      "sha256": "634d8d6ae263be8ff1c1358815295f31047d0dd68aa51d4c2606ccc5bbc8737b"
+    }
+  },
+  "dump": {
+    "file": "data/init/01_dump.sql.gz",
+    "sha256": "3341d5afbb4d03ca9ff593dec2f59df9031a2a6d7a2087509b1db947382f94f6"
+  }
+}

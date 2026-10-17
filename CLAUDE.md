@@ -30,9 +30,12 @@ questions, UI text. The user may chat with you in Portuguese; the repository sta
 - `knowledge/`: markdown and YAML that are embedded (schema docs, glossary, example queries)
 - `index/`: committed vectors (`embeddings.json`) and `index_meta.json`; ChromaDB is loaded from them
 - `data/init/`: committed PostgreSQL dump and role script, loaded by the `db` container on first start
-- `scripts/build_db.py`: deterministic synthetic data generator (produces the dump)
-- `src/assistant/`: config, llm, trace, schemas, guard, executor, db, knowledge, tools, intake,
-  pipeline (variant A), agent (variant B), verify, api
+- `data/fingerprint.json`: manifest of the frozen data (version, per-table SHA-256, dump SHA-256)
+- `scripts/build_db.py`: deterministic synthetic data generator (produces the dump);
+  `scripts/freeze_data.py` writes the manifest; `scripts/parity_check.py` is the one-off SQLite check
+- `docker-compose.yml` (no DB port published) and `compose.dev.yml` (adds `127.0.0.1:55432`, dev only)
+- `src/assistant/`: fingerprint, config, llm, trace, schemas, guard, executor, db, knowledge, tools,
+  intake, pipeline (variant A), agent (variant B), verify, api
 - `ui/streamlit_app.py`; `evals/` (golden_set.json, compare.py, run.py); `config/pricing.toml`
 - `tests/unit` (no DB, no key), `tests/integration` (needs the compose db), `tests/security`
 - `docs/`: PLAN.md, LOG.md, architecture.md, data_model.md, evaluation.md, results/
@@ -42,8 +45,9 @@ questions, UI text. The user may chat with you in Portuguese; the repository sta
 uv sync                                  # environment
 docker compose up --build                # db + api + ui
 uv run pytest -q -m "not integration"    # unit tests, no DB, no API key
-uv run pytest -q -m integration          # needs: docker compose up -d db
-make dump                                # regenerate data/init from scripts/build_db.py
+make db-dev                              # db only, with the dev loopback port (compose.dev.yml)
+uv run pytest -q -m integration          # needs: make db-dev (connects as app_ro)
+make dump                                # regenerate data/init and data/fingerprint.json (throwaway container)
 make index                               # re-embed knowledge/ (calls the embeddings API)
 make eval                                # evaluation runner (costs money, prints an estimate first)
 uv run pre-commit run --all-files        # every check, as CI runs them
