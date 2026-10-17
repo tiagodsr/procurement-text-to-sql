@@ -1,7 +1,7 @@
 # Plan: Procurement Text-to-SQL Assistant
 
 Deadline 2026-10-21 23:59. No new features after 18:00 on 2026-10-21.
-Status: not started. Tick the boxes as steps complete. Notes go in `docs/LOG.md`.
+Status: Step 0 done. Tick the boxes as steps complete. Notes go in `docs/LOG.md`.
 
 ## 1. Product
 
@@ -140,9 +140,9 @@ tables. Choose k from the numbers.
 ## 9. Steps
 
 ### Step 0. Foundation (1h)
-- [ ] Repo, `.gitignore` (`.env`, `.local/`, `CLAUDE.local.md`, caches), `pyproject.toml`, uv, Ruff,
+- [x] Repo, `.gitignore` (`.env`, `.local/`, `CLAUDE.local.md`, caches), `pyproject.toml`, uv, Ruff,
   pre-commit, CI skeleton, `.env.example`, `.gitattributes` (`eol=lf`), folders, README skeleton.
-- [ ] `config/pricing.toml` skeleton, `docs/LOG.md`.
+- [x] `config/pricing.toml` skeleton, `docs/LOG.md`.
 DoD: `uv sync` works, hooks run, first commit on `dev`.
 
 ### Step 1. PostgreSQL, data, Compose (limit 4h)
