@@ -118,3 +118,15 @@ Findings while testing, for later steps:
   matches the office item "Notebook A5 lined", a trap worth a case in Step 4.
 
 Step 1 finished at 18:35, 2 h 30 min of the 4 h time box. No fallback to SQLite needed.
+
+## Step 2. Contracts and measurement (started 2026-10-18 12:06, time box 2 h)
+
+**Settings and prices (`src/assistant/config.py`, `config/pricing.toml`).** `load_settings(env)`
+turns environment variables into a frozen `Settings` (key as `SecretStr`, models, timeout, trace
+folder, pricing path); the environment is a parameter, so tests pass a dict. The database URL must use
+the `app_ro` user: one more layer for the read-only rule, next to the role and the guard.
+`load_pricing(path)` reads the TOML with `Decimal` numbers (no float error in cost) into a `Pricing`
+model: one `ModelPrice` per model (`chat` needs `output`, `embedding` must not have it; a missing
+`cached_input` bills cached tokens at the input price, which can only overestimate), and `as_of` is
+required once any price is listed. `price(model)` fails loudly for an unpriced model, so no call is
+ever made without a known cost. No settings library: a dozen lines of reading `os.environ` is enough.
