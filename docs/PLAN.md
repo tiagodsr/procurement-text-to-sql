@@ -218,12 +218,12 @@ DoD: delivered before 18:00 cut-off with margin.
 
 | Day | Steps |
 |---|---|
-| Sat 2026-10-18 | 0, 1, 2, 3 |
-| Sun 2026-10-19 | 4, 5, 6 (minimum deliverable) |
-| Mon 2026-10-20 | 7, 8, 9 |
-| Tue 2026-10-21 | 10; features stop at 18:00 |
+| Sun 2026-10-18 | 0, 1, 2, 3 |
+| Mon 2026-10-19 | 4, 5, 6 (minimum deliverable) |
+| Tue 2026-10-20 | 7, 8, 9 |
+| Wed 2026-10-21 | 10; features stop at 18:00 |
 
-If variant A is not stable by Sunday night, Monday finishes A and B becomes v1.1.
+If variant A is not stable by Monday night, Tuesday finishes A and B becomes v1.1.
 Cut order: second model, verification beyond sanity checks, Streamlit polish (the API docs page is the
 demo), variant B.
 Never cut: Docker starting, golden set with comparison, guard and read-only role, clarification and
