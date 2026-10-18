@@ -41,6 +41,10 @@ jobs:
     name: Security - Gitleaks
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # On pull requests the action lists the PR's commits through the API, which needs this.
+    permissions:
+      contents: read
+      pull-requests: read
     steps:
       - name: SETUP - Checkout (full history)
         uses: actions/checkout@v7
