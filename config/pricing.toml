@@ -1,0 +1,16 @@
+# Model prices used to compute the cost of every LLM and embedding call.
+# Copy the numbers from the source page and update `as_of` whenever they change.
+# Never hardcode prices in code: assistant.llm reads them from here.
+# The values are filled in Step 2, together with assistant.llm.
+
+[meta]
+as_of = ""                                  # date the prices were copied, YYYY-MM-DD
+source = "https://openai.com/api/pricing/"
+currency = "USD"
+unit = "per 1M tokens"
+
+# One table per model, for example:
+# [models."<model-id>"]
+# input = 0.0
+# cached_input = 0.0
+# output = 0.0

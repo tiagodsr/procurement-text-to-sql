@@ -1,0 +1,7 @@
+# Development only: publish the database on the loopback interface for host-side integration
+# tests and exploration. Use together with the base file:
+#   docker compose -f docker-compose.yml -f compose.dev.yml up -d --wait db
+services:
+  db:
+    ports:
+      - "127.0.0.1:55432:5432"

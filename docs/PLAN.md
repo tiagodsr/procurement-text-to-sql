@@ -1,7 +1,7 @@
 # Plan: Procurement Text-to-SQL Assistant
 
 Deadline 2026-10-21 23:59. No new features after 18:00 on 2026-10-21.
-Status: not started. Tick the boxes as steps complete. Notes go in `docs/LOG.md`.
+Status: Steps 0 and 1 done. Tick the boxes as steps complete. Notes go in `docs/LOG.md`.
 
 ## 1. Product
 
@@ -38,7 +38,7 @@ compared on one golden set, dev and holdout split, cost and latency tracking, Do
 |---|---|
 | Name | `procurement-text-to-sql`. Everything in English |
 | Database | PostgreSQL 16. Generator adapted only in schema, connection and inserts (same random draws). Time box 4h for the port; fallback is SQLite from the old repo tag `sqlite-final` |
-| Data on the professor's side | Committed dump in `data/init/`, loaded by the `db` container. No seed service |
+| Data on the professor's side | Committed dump in `data/init/`, loaded by the `db` container. No seed service. The DB port is not published; `compose.dev.yml` adds `127.0.0.1:55432` for host-side tests only |
 | Search index | Committed vectors (`index/embeddings.json`, `index_meta.json`) loaded into embedded ChromaDB at startup. No embedding call needed to start |
 | Embeddings | `text-embedding-3-small`. The query embedding is computed by `llm.py` so cost and latency are traced |
 | Models | OpenAI. Base `gpt-4.1-mini` (as in the course); one stronger OpenAI model for comparison. Prices copied from the OpenAI pricing page into `config/pricing.toml` with a date |
@@ -140,22 +140,23 @@ tables. Choose k from the numbers.
 ## 9. Steps
 
 ### Step 0. Foundation (1h)
-- [ ] Repo, `.gitignore` (`.env`, `.local/`, `CLAUDE.local.md`, caches), `pyproject.toml`, uv, Ruff,
+- [x] Repo, `.gitignore` (`.env`, `.local/`, `CLAUDE.local.md`, caches), `pyproject.toml`, uv, Ruff,
   pre-commit, CI skeleton, `.env.example`, `.gitattributes` (`eol=lf`), folders, README skeleton.
-- [ ] `config/pricing.toml` skeleton, `docs/LOG.md`.
+- [x] `config/pricing.toml` skeleton, `docs/LOG.md`.
 DoD: `uv sync` works, hooks run, first commit on `dev`.
 
 ### Step 1. PostgreSQL, data, Compose (limit 4h)
-- [ ] Adapt `scripts/build_db.py` to PostgreSQL: types `DATE`, `NUMERIC(14,2)`, `NUMERIC(10,4)`,
+- [x] Adapt `scripts/build_db.py` to PostgreSQL: types `DATE`, `NUMERIC(14,2)`, `NUMERIC(10,4)`,
   `NUMERIC(4,1)`, `BOOLEAN` (convert with `bool()`), `BIGINT` for cart ids; `%s` placeholders; no
   `PRAGMA`; target-database allowlist; random-draw code unchanged.
-- [ ] One-off parity check against `.local/sqlite_reference.db`: row counts and per-table checksums.
-- [ ] Then add `lead_time_days` to `catalog_items` (the value is already drawn; capture it without
+- [x] One-off parity check against `.local/sqlite_reference.db`: row counts and per-table checksums.
+- [x] Then add `lead_time_days` to `catalog_items` (the value is already drawn; capture it without
   changing draw order). Freeze the data and record the fingerprint.
-- [ ] `make dump` writes `data/init/01_dump.sql.gz` and `02_roles.sql` (role `app_ro`: SELECT only,
+- [x] `make dump` writes `data/init/01_dump.sql.gz` and `02_roles.sql` (role `app_ro`: SELECT only,
   `default_transaction_read_only = on`, `statement_timeout`; local password documented).
-- [ ] `docker-compose.yml`: `db` (pinned image, healthcheck, DB port not published to the host).
-- [ ] Tests: schema and integrity, determinism across `PYTHONHASHSEED`, dump fingerprint, `app_ro` can
+- [x] `docker-compose.yml`: `db` (pinned image, healthcheck, DB port not published to the host).
+  `compose.dev.yml` publishes it on `127.0.0.1:55432` for integration tests only.
+- [x] Tests: schema and integrity, determinism across `PYTHONHASHSEED`, dump fingerprint, `app_ro` can
   read and cannot write.
 DoD: `docker compose up -d db` loads the data; parity report identical; tests green.
 

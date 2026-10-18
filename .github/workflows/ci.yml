@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [dev]
+  pull_request:
+    branches: [dev, main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint - Ruff
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: SETUP - Checkout
+        uses: actions/checkout@v7
+
+      - name: SETUP - uv
+        uses: astral-sh/setup-uv@v10.3.0
+        with:
+          enable-cache: true
+
+      - name: PYTHON - Install dependencies
+        run: uv sync --locked
+
+      - name: PYTHON - Ruff linter
+        run: uv run ruff check --output-format=github
+
+      - name: PYTHON - Ruff formatter
+        run: uv run ruff format --check --diff
+
+  secrets:
+    name: Security - Gitleaks
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # On pull requests the action lists the PR's commits through the API, which needs this.
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - name: SETUP - Checkout (full history)
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: SECURITY - Scan for secrets
+        uses: gitleaks/gitleaks-action@v3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_ENABLE_COMMENTS: "false"
+
+  unit-tests:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: SETUP - Checkout
+        uses: actions/checkout@v7
+
+      - name: SETUP - uv
+        uses: astral-sh/setup-uv@v10.3.0
+        with:
+          enable-cache: true
+
+      - name: PYTHON - Install dependencies
+        run: uv sync --locked
+
+      - name: TESTS - Unit tests (no database, no API key)
+        run: uv run pytest -q -m "not integration"
