@@ -130,3 +130,12 @@ model: one `ModelPrice` per model (`chat` needs `output`, `embedding` must not h
 `cached_input` bills cached tokens at the input price, which can only overestimate), and `as_of` is
 required once any price is listed. `price(model)` fails loudly for an unpriced model, so no call is
 ever made without a known cost. No settings library: a dozen lines of reading `os.environ` is enough.
+
+**Contracts (`src/assistant/schemas.py`).** Every Pydantic model that crosses a module boundary: the
+request, the three LLM outputs, tool and executor results, the trace event and the final answer.
+Inputs: dicts or JSON; outputs: validated, frozen objects (unknown fields are rejected). The status
+rules of PLAN.md section 5 are model validators on `FinalAnswer`, so a pipeline bug that would, say,
+return `answered` without SQL fails loudly instead of reaching the user; `out_of_scope` and `refused`
+are also checked against the trace (no `execute` event). LLM output models keep their limits in
+validators, not in `Field` constraints, because strict structured outputs accept only a small subset
+of JSON Schema; a test walks their schemas to prove it.
