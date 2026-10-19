@@ -34,8 +34,9 @@ questions, UI text. The user may chat with you in Portuguese; the repository sta
 - `scripts/build_db.py`: deterministic synthetic data generator (produces the dump);
   `scripts/freeze_data.py` writes the manifest; `scripts/parity_check.py` is the one-off SQLite check
 - `docker-compose.yml` (no DB port published) and `compose.dev.yml` (adds `127.0.0.1:55432`, dev only)
-- `src/assistant/`: fingerprint, config, llm, trace, schemas, guard, executor, db, knowledge, tools,
-  intake, pipeline (variant A), agent (variant B), verify, api
+- `src/assistant/`: fingerprint, config, pricing, llm, fake_llm (offline client for tests and demos),
+  trace, schemas, guard, executor, db, knowledge, tools, intake, pipeline (variant A),
+  agent (variant B), verify, api
 - `ui/streamlit_app.py`; `evals/` (golden_set.json, compare.py, run.py); `config/pricing.toml`
 - `tests/unit` (no DB, no key), `tests/integration` (needs the compose db), `tests/security`
 - `docs/`: PLAN.md, LOG.md, architecture.md, data_model.md, evaluation.md, results/

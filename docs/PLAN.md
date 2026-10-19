@@ -92,7 +92,8 @@ procurement-text-to-sql/
   knowledge/   schema/*.md (one file per table and view)   glossary.md   examples.yaml
   index/       embeddings.json   index_meta.json
   data/init/   01_dump.sql.gz   02_roles.sql
-  src/assistant/   config llm trace schemas guard executor db knowledge tools intake pipeline agent verify api
+  src/assistant/   config pricing llm fake_llm trace schemas guard executor db knowledge tools intake
+                   pipeline agent verify api
   ui/streamlit_app.py
   scripts/     build_db.py   preflight.py
   evals/       golden_set.json   compare.py   run.py

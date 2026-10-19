@@ -151,3 +151,26 @@ the same method as NumPy's default and `statistics.quantiles(method="inclusive")
 (eight lines) because the standard library refuses fewer than two values, and the tests compare the
 two. A request's latency is its `request` event (wall clock) when present, else the sum of its steps;
 its cost is always the sum of the step events, so a total is never counted twice.
+
+**LLM access (`src/assistant/llm.py`, `src/assistant/fake_llm.py`).** The only door to the OpenAI API.
+`parse(client, ..., output_type)` makes one structured Responses call and returns an `LLMResult`
+(validated output, or a failure: `refusal`, `incomplete`, `invalid_output`); `embed(client, texts)`
+embeds in batches and returns vectors in input order. Both receive the client, the prices, the tracer
+and a clock as parameters, so tests pass `FakeOpenAI` and a fake clock: no network, no key, exact
+latency. Every call writes one trace event, failures included; an unpriced model fails before the
+call; network and API errors are traced and raised as `LLMUnavailable` (Step 9 maps it to 502).
+Cost = uncached input × input price + cached × cached price + output × output price, per 1M tokens,
+in `Decimal`; reasoning tokens are already inside `output_tokens`. `cache_write_tokens`, new in this
+SDK, are not priced (the page lists no write price for our models). The call uses
+`responses.create` with the strict schema from the SDK helper `type_to_text_format_param` (the one
+`responses.parse` uses) and validates the text with our own model: with `responses.parse`, a failing
+cross-field validator raises inside the SDK and the usage of a paid call is lost. The helper is
+private, so `openai` is pinned to `>=3.35.1,<4` and a test builds the format for every LLM output.
+`store=False`: questions and answers are not kept on OpenAI's side. Untrusted text (the question,
+tool and database output) only ever goes in `input`; `instructions` is built from trusted text.
+`fake_llm.py` lives in the package because the demo uses it (and later a dry-run mode); it builds
+replies with the SDK's own response types, so a shape mismatch fails in the tests, not in production.
+It caught one at once: in this SDK, `input_tokens_details.cache_write_tokens` is a required field.
+`llm.py` passed 150 lines, so, as agreed, the cost (`cost_usd`) and the price check (`price_for`) moved
+to `src/assistant/pricing.py`; `llm.py` is now 216 lines, about 55 of them the demo. Latencies are
+rounded to the microsecond so float subtraction noise (9.999... ms) never reaches the trace.

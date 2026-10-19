@@ -5,6 +5,7 @@ description = "Natural-language questions over synthetic procurement data, answe
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 dependencies = [
+    "openai>=3.35.1,<4",
     "psycopg[binary]>=3.3.6",
     "pydantic>=2.14.1,<3",
 ]
