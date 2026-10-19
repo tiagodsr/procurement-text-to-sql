@@ -174,3 +174,12 @@ It caught one at once: in this SDK, `input_tokens_details.cache_write_tokens` is
 `llm.py` passed 150 lines, so, as agreed, the cost (`cost_usd`) and the price check (`price_for`) moved
 to `src/assistant/pricing.py`; `llm.py` is now 216 lines, about 55 of them the demo. Latencies are
 rounded to the microsecond so float subtraction noise (9.999... ms) never reaches the trace.
+
+**Outcome (2026-10-19 09:15).** DoD met: with fictitious test prices (1.00 / 0.50 / 4.00 per 1M
+tokens), a fake call of 1,200 input tokens (200 cached) and 300 output tokens costs exactly
+0.0023 USD and takes exactly 250 ms; three calls of 100, 200 and 400 ms give p50 200 ms and p95
+380 ms, read back from the JSONL file. 135 unit tests, no database, no key, no API money spent.
+About 1 h 15 min of the 2 h time box (paused overnight for the `schemas.py` review).
+Open: the real prices are not in `config/pricing.toml` yet, so `python -m assistant.llm --demo`
+stops with "no price for model" until they are (or runs with `--pricing <file>`). They are needed
+before the first real call in Step 5.

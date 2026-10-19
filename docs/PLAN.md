@@ -1,7 +1,7 @@
 # Plan: Procurement Text-to-SQL Assistant
 
 Deadline 2026-10-21 23:59. No new features after 18:00 on 2026-10-21.
-Status: Steps 0 and 1 done. Tick the boxes as steps complete. Notes go in `docs/LOG.md`.
+Status: Steps 0, 1 and 2 done. Tick the boxes as steps complete. Notes go in `docs/LOG.md`.
 
 ## 1. Product
 
@@ -162,8 +162,11 @@ DoD: `uv sync` works, hooks run, first commit on `dev`.
 DoD: `docker compose up -d db` loads the data; parity report identical; tests green.
 
 ### Step 2. Contracts and measurement (2h)
-- [ ] `config.py`, `schemas.py` (all Pydantic models, statuses, cross-field validators), `trace.py`,
-  `llm.py` (`parse()` and `embed()` with tokens, latency, cost). Unit tests with a fake client.
+- [x] `config.py`, `schemas.py` (all Pydantic models, statuses, cross-field validators), `trace.py`,
+  `llm.py` (`parse()` and `embed()` with tokens, latency, cost; cost in `pricing.py`). Unit tests with
+  a fake client (`fake_llm.py`).
+- [ ] Real prices for `gpt-4.1-mini` and `text-embedding-3-small` in `config/pricing.toml` (needed
+  before the first real call in Step 5; the stronger model by Step 6).
 DoD: a fake call yields correct cost, latency and p50/p95.
 
 ### Step 3. Safe SQL (3h)

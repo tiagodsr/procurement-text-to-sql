@@ -27,6 +27,25 @@ The first start loads the committed dump (`data/init/01_dump.sql.gz`) and create
 `app_ro` (`data/init/02_roles.sql`, local password `app_ro_local`). The base Compose file publishes no
 database port. See [docs/data_model.md](docs/data_model.md) for the tables and their pitfalls.
 
+## Contracts, LLM calls and cost
+
+Every LLM and embedding call goes through `assistant.llm`, which writes one trace event (model,
+tokens, cost, latency, status) per call to `var/traces/YYYY-MM-DD.jsonl` (git-ignored). Prices come
+from `config/pricing.toml`; a model without a price is never called. These demos need no API key and
+spend nothing (they use an offline fake client):
+
+```bash
+uv run python -m assistant.config                 # settings (key masked) and priced models
+uv run python -m assistant.schemas --examples     # one valid answer per status
+uv run python -m assistant.schemas FinalAnswer    # JSON schema of a contract
+uv run python -m assistant.llm --demo             # three fake calls: cost, latency, p50/p95
+uv run python -m assistant.trace var/traces/*.jsonl   # p50/p95 latency and cost from a trace
+uv run python -m assistant.pricing gpt-4.1-mini 1200 200 300   # cost of input/cached/output tokens
+```
+
+Settings are read from environment variables (see `.env.example`); for local runs that need the key,
+use `uv run --env-file .env ...`.
+
 ## Development
 
 ```bash
@@ -46,6 +65,7 @@ src/assistant/   application package
 data/            init/ (dump and role script loaded by the db container), fingerprint.json
 scripts/         data generator, freeze and one-off parity check
 config/          model prices (pricing.toml)
+var/             runtime output, git-ignored (traces/*.jsonl)
 tests/           unit/ (no DB, no key), integration/ (needs the db), security/
 docs/            plan, log, data model, golden-set guide
 ```
