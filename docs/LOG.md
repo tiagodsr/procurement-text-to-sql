@@ -138,4 +138,16 @@ rules of PLAN.md section 5 are model validators on `FinalAnswer`, so a pipeline 
 return `answered` without SQL fails loudly instead of reaching the user; `out_of_scope` and `refused`
 are also checked against the trace (no `execute` event). LLM output models keep their limits in
 validators, not in `Field` constraints, because strict structured outputs accept only a small subset
-of JSON Schema; a test walks their schemas to prove it.
+of JSON Schema; a test walks their schemas to prove it. The module came out at 380 lines, all
+declarations; it stays one file (approved), because splitting the LLM outputs off would also need a
+separate base module to avoid a circular import.
+
+**Tracing (`src/assistant/trace.py`).** A `Tracer` belongs to one request: `record(**fields)` builds a
+`TraceEvent` with that request's id and variant, keeps it in memory (for `FinalAnswer.usage`) and, if
+a folder is given, appends it as one JSON line to `var/traces/YYYY-MM-DD.jsonl` (git-ignored; a lock
+keeps concurrent API requests from interleaving lines). `summarize(events)` gives p50/p95 latency and
+mean/p95 cost per request and per step. Percentiles use linear interpolation between closest ranks,
+the same method as NumPy's default and `statistics.quantiles(method="inclusive")`; it is written out
+(eight lines) because the standard library refuses fewer than two values, and the tests compare the
+two. A request's latency is its `request` event (wall clock) when present, else the sum of its steps;
+its cost is always the sum of the step events, so a total is never counted twice.
