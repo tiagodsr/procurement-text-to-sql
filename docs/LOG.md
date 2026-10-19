@@ -221,3 +221,19 @@ Left to the other layers, because the guard cannot decide them from the tree alo
 - Casts are not checked by type: `'pg_authid'::regclass` passes and resolves an object id (no rows).
 - Privileges: the guard does not know what `app_ro` may read or write. The role is what refuses
   writes even if the guard were bypassed (integration tests, next session).
+
+**Executor (`src/assistant/executor.py`, 2026-10-20).** Runs SQL the guard accepted. Input: a
+`GuardedSQL` (never raw LLM text) and an `ExecutorConfig` (timeout, EXPLAIN cost limit, preview
+size); it always connects with `settings.database_url`, which must be `app_ro`, and checks the
+session user again after connecting. Output: `SqlResult` (preview, row count, truncated, time in the
+database) or `SqlError` whose `kind` comes from the SQLSTATE (class 42 is `syntax`, except the
+undefined-object codes and `42501` permission; `57014` is `timeout`; `25006` is `permission`). One
+transaction per query: `BEGIN READ ONLY`, `SET LOCAL statement_timeout`, `EXPLAIN (FORMAT JSON)`
+(above the cost limit it stops with `cost_limit` and never runs the query), the query, then always
+`ROLLBACK`. Statements are sent with `prepare=True`, so PostgreSQL itself rejects a second stacked
+statement even if the guard were skipped. Calibration on the frozen data: the guard's 15 normal
+queries cost 0 to 2,000 units, a two-table cross join 4.4 million and the three-table one 7.6e10;
+the limit is 1,000,000. A database that cannot be reached raises `DatabaseUnavailable` (Step 7 maps
+it to 503) instead of returning an `SqlError`, because the repair loop must not spend LLM calls on
+an outage. Database messages are untrusted data: only the primary message and the hint are kept,
+cut to 300 characters. Tracing stays in the pipeline, which owns the request's tracer.
