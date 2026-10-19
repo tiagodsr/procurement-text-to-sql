@@ -237,3 +237,15 @@ the limit is 1,000,000. A database that cannot be reached raises `DatabaseUnavai
 it to 503) instead of returning an `SqlError`, because the repair loop must not spend LLM calls on
 an outage. Database messages are untrusted data: only the primary message and the hint are kept,
 cut to 300 characters. Tracing stays in the pipeline, which owns the request's tracer.
+
+**Zero-row diagnostic (`src/assistant/diagnose.py`).** Explains an empty result so `no_data` can
+say which filter removed the rows. Input: the guarded SQL that returned zero rows and a runner (the
+executor by default, a fake in unit tests). Output: `NoDataDiagnostic` with one `FilterCheck` per
+top-level condition (the outer SELECT's `WHERE` and `HAVING`, split on `AND`; an `OR` group or a
+parenthesised group stays one filter) and a summary written by code, not by an LLM. Each variant
+drops exactly one condition with sqlglot, goes through the guard again and runs through the
+executor, so the diagnostic has the same limits as any query (EXPLAIN check, timeout, read-only). At
+most 8 filters are checked; a variant that is blocked or fails is reported as not checked.
+`rows_without` counts rows returned, so it is capped by the guard's forced LIMIT (1,000); for a
+diagnostic, "some rows" versus "none" is what matters. Filters inside CTEs or subqueries are not
+split: a first version that stays small and predictable.
