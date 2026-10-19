@@ -1,5 +1,6 @@
 """Attacks on the SQL guard. Each one names the rule that must fire. No database, no API key: the
-same attacks sent straight to the app_ro role are in tests/integration (Step 3, executor work)."""
+same attacks sent straight to the app_ro role, with no guard, are in
+tests/integration/test_role_attacks.py."""
 
 import pytest
 
@@ -62,7 +63,7 @@ ATTACKS = [
         "WITH a AS (SELECT * FROM pg_authid), pg_authid AS (SELECT 1) SELECT * FROM a",
         "table_not_allowed",
     ),
-    ("unicode escape", 'SELECT * FROM U&"pg\\0061uthid"', "parse_error"),
+    ("unicode escape", 'SELECT * FROM U&"pg\\005fauthid"', "parse_error"),  # \005f is "_"
     # dangerous functions
     ("pg_sleep", "SELECT pg_sleep(10)", "function_not_allowed"),
     ("qualified pg_sleep", "SELECT pg_catalog.pg_sleep(10)", "function_not_allowed"),
