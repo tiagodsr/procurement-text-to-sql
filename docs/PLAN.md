@@ -171,12 +171,13 @@ DoD: a fake call yields correct cost, latency and p50/p95.
 
 ### Step 3. Safe SQL (Mon night to Tue 10:00)
 - [x] Real prices for `gpt-4.1-mini` and `text-embedding-3-small` in `config/pricing.toml`.
-- [ ] `guard.py` (sqlglot, dialect postgres): one statement, SELECT only (writes, DDL, `COPY`, `SET`
+- [x] `guard.py` (sqlglot, dialect postgres): one statement, SELECT only (writes, DDL, `COPY`, `SET`
   anywhere, CTEs included), no `SELECT INTO`, no locking clauses, table and function allowlists,
   depth limit, forced outer `LIMIT`, structured `GuardViolation`. No regex for security.
 - [ ] `executor.py`: READ ONLY transaction, `SET LOCAL statement_timeout`, EXPLAIN cost check, row
   preview, typed errors, rollback. `diagnose.py`: zero-row diagnostic (drop one filter at a time).
-- [ ] Security suite from section 8 (guard unit tests and role integration tests).
+- [ ] Security suite from section 8 (guard unit tests and role integration tests). Guard part done
+  on 2026-10-19 (`tests/security/test_guard_attacks.py`); the role tests remain.
 DoD: every attack blocked by the intended rule; the role refuses them without the guard.
 
 ### Step 4. Golden set and comparison (Tue 10:00 to 12:30)

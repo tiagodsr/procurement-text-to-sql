@@ -168,6 +168,8 @@ def _check_tables(root: exp.Expression, allowed: frozenset[str]) -> None:
 
 def _check_functions(root: exp.Expression, allowed: frozenset[str]) -> None:
     for func in root.find_all(exp.Func):
+        if isinstance(func, exp.Connector):
+            continue  # AND / OR are logic, not calls (sqlglot 30 makes them Func subclasses)
         name = (func.name if isinstance(func, exp.Anonymous) else func.sql_name()).lower()
         if isinstance(func.parent, exp.Dot):
             raise _Blocked("function_not_allowed", f"schema-qualified function {name!r}")

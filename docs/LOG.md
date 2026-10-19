@@ -204,3 +204,20 @@ is one layer: the `app_ro` role and the executor's READ ONLY transaction stay in
 `sqlglot` is pinned to `>=30.23,<31`: the guard's decisions depend on how the parser builds the tree
 (argument names such as `from_` and `with_` changed between majors), so an upgrade is a deliberate
 step that re-runs the attack tests.
+
+**Guard tests (2026-10-19 night).** `tests/security/test_guard_attacks.py`: 43 attacks, each naming
+its rule, and every rule has at least one; `tests/unit/test_guard.py`: 15 normal queries pass, and
+for each one the output parses to the same tree as the input once the outer LIMIT is removed, and
+checking the output again changes nothing. They found one bug at once: in sqlglot 30, `AND` and
+`OR` are `Func` subclasses, so every query with a condition was blocked as `function_not_allowed`;
+connectors are now skipped. Other findings: sqlglot upper-cases quoted function names
+(`"make_date"` becomes `"MAKE_DATE"`), which the round-trip check catches (fails closed);
+`current_date` and `now()` are not in the allowlist, and the message points at `meta.as_of_date`.
+Left to the other layers, because the guard cannot decide them from the tree alone:
+- An exploding cross join (and `JOIN ... ON true`, and `COUNT(*)` over a huge product, which a LIMIT
+  does not bound): the executor's EXPLAIN cost check and `statement_timeout`.
+- Cost of allowed functions over large inputs (regex is not allowed, but `LIKE` over every line is):
+  the timeout.
+- Casts are not checked by type: `'pg_authid'::regclass` passes and resolves an object id (no rows).
+- Privileges: the guard does not know what `app_ro` may read or write. The role is what refuses
+  writes even if the guard were bypassed (integration tests, next session).
