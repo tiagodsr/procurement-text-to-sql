@@ -1,7 +1,7 @@
 # Plan: Procurement Text-to-SQL Assistant
 
 Deadline 2026-10-21 23:59. No new features after 18:00 on 2026-10-21.
-Status: Steps 0 and 1 done. Tick the boxes as steps complete. Notes go in `docs/LOG.md`.
+Status: Steps 0, 1 and 2 done. Tick the boxes as steps complete. Notes go in `docs/LOG.md`.
 
 ## 1. Product
 
@@ -92,7 +92,8 @@ procurement-text-to-sql/
   knowledge/   schema/*.md (one file per table and view)   glossary.md   examples.yaml
   index/       embeddings.json   index_meta.json
   data/init/   01_dump.sql.gz   02_roles.sql
-  src/assistant/   config llm trace schemas guard executor db knowledge tools intake pipeline agent verify api
+  src/assistant/   config pricing llm fake_llm trace schemas guard executor db knowledge tools intake
+                   pipeline agent verify api
   ui/streamlit_app.py
   scripts/     build_db.py   preflight.py
   evals/       golden_set.json   compare.py   run.py
@@ -161,8 +162,11 @@ DoD: `uv sync` works, hooks run, first commit on `dev`.
 DoD: `docker compose up -d db` loads the data; parity report identical; tests green.
 
 ### Step 2. Contracts and measurement (2h)
-- [ ] `config.py`, `schemas.py` (all Pydantic models, statuses, cross-field validators), `trace.py`,
-  `llm.py` (`parse()` and `embed()` with tokens, latency, cost). Unit tests with a fake client.
+- [x] `config.py`, `schemas.py` (all Pydantic models, statuses, cross-field validators), `trace.py`,
+  `llm.py` (`parse()` and `embed()` with tokens, latency, cost; cost in `pricing.py`). Unit tests with
+  a fake client (`fake_llm.py`).
+- [ ] Real prices for `gpt-4.1-mini` and `text-embedding-3-small` in `config/pricing.toml` (needed
+  before the first real call in Step 5; the stronger model by Step 6).
 DoD: a fake call yields correct cost, latency and p50/p95.
 
 ### Step 3. Safe SQL (3h)
@@ -218,12 +222,12 @@ DoD: delivered before 18:00 cut-off with margin.
 
 | Day | Steps |
 |---|---|
-| Sat 2026-10-18 | 0, 1, 2, 3 |
-| Sun 2026-10-19 | 4, 5, 6 (minimum deliverable) |
-| Mon 2026-10-20 | 7, 8, 9 |
-| Tue 2026-10-21 | 10; features stop at 18:00 |
+| Sun 2026-10-18 | 0, 1, 2, 3 |
+| Mon 2026-10-19 | 4, 5, 6 (minimum deliverable) |
+| Tue 2026-10-20 | 7, 8, 9 |
+| Wed 2026-10-21 | 10; features stop at 18:00 |
 
-If variant A is not stable by Sunday night, Monday finishes A and B becomes v1.1.
+If variant A is not stable by Monday night, Tuesday finishes A and B becomes v1.1.
 Cut order: second model, verification beyond sanity checks, Streamlit polish (the API docs page is the
 demo), variant B.
 Never cut: Docker starting, golden set with comparison, guard and read-only role, clarification and

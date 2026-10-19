@@ -7,6 +7,9 @@
 .local/
 CLAUDE.local.md
 
+# Runtime output (trace events, var/traces/*.jsonl)
+var/
+
 # Python and tool caches
 __pycache__/
 .venv/

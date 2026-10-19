@@ -1,16 +1,25 @@
-# Model prices used to compute the cost of every LLM and embedding call.
-# Copy the numbers from the source page and update `as_of` whenever they change.
-# Never hardcode prices in code: assistant.llm reads them from here.
-# The values are filled in Step 2, together with assistant.llm.
+# Model prices used to compute the cost of every LLM and embedding call (assistant.llm).
+# Copy the numbers from the source page (Standard tier, not Batch, Flex or Priority) and set
+# `as_of` to the day you copied them. Never hardcode prices in code.
+# Read by assistant.config.load_pricing; numbers are parsed as Decimal.
 
 [meta]
-as_of = ""                                  # date the prices were copied, YYYY-MM-DD
+as_of = ""                                  # YYYY-MM-DD; required once any model is listed
 source = "https://openai.com/api/pricing/"
 currency = "USD"
 unit = "per 1M tokens"
 
-# One table per model, for example:
-# [models."<model-id>"]
+# One table per model. `kind` is "chat" (input, cached_input, output) or "embedding" (input only).
+# A chat model without `cached_input` bills cached tokens at the input price.
+#
+# [models."gpt-4.1-mini"]
+# kind = "chat"
 # input = 0.0
 # cached_input = 0.0
 # output = 0.0
+#
+# [models."text-embedding-3-small"]
+# kind = "embedding"
+# input = 0.0
+#
+# Stronger comparison model: chosen by Step 6.

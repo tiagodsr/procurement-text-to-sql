@@ -118,3 +118,68 @@ Findings while testing, for later steps:
   matches the office item "Notebook A5 lined", a trap worth a case in Step 4.
 
 Step 1 finished at 18:35, 2 h 30 min of the 4 h time box. No fallback to SQLite needed.
+
+## Step 2. Contracts and measurement (started 2026-10-18 12:06, time box 2 h)
+
+**Settings and prices (`src/assistant/config.py`, `config/pricing.toml`).** `load_settings(env)`
+turns environment variables into a frozen `Settings` (key as `SecretStr`, models, timeout, trace
+folder, pricing path); the environment is a parameter, so tests pass a dict. The database URL must use
+the `app_ro` user: one more layer for the read-only rule, next to the role and the guard.
+`load_pricing(path)` reads the TOML with `Decimal` numbers (no float error in cost) into a `Pricing`
+model: one `ModelPrice` per model (`chat` needs `output`, `embedding` must not have it; a missing
+`cached_input` bills cached tokens at the input price, which can only overestimate), and `as_of` is
+required once any price is listed. `price(model)` fails loudly for an unpriced model, so no call is
+ever made without a known cost. No settings library: a dozen lines of reading `os.environ` is enough.
+
+**Contracts (`src/assistant/schemas.py`).** Every Pydantic model that crosses a module boundary: the
+request, the three LLM outputs, tool and executor results, the trace event and the final answer.
+Inputs: dicts or JSON; outputs: validated, frozen objects (unknown fields are rejected). The status
+rules of PLAN.md section 5 are model validators on `FinalAnswer`, so a pipeline bug that would, say,
+return `answered` without SQL fails loudly instead of reaching the user; `out_of_scope` and `refused`
+are also checked against the trace (no `execute` event). LLM output models keep their limits in
+validators, not in `Field` constraints, because strict structured outputs accept only a small subset
+of JSON Schema; a test walks their schemas to prove it. The module came out at 380 lines, all
+declarations; it stays one file (approved), because splitting the LLM outputs off would also need a
+separate base module to avoid a circular import.
+
+**Tracing (`src/assistant/trace.py`).** A `Tracer` belongs to one request: `record(**fields)` builds a
+`TraceEvent` with that request's id and variant, keeps it in memory (for `FinalAnswer.usage`) and, if
+a folder is given, appends it as one JSON line to `var/traces/YYYY-MM-DD.jsonl` (git-ignored; a lock
+keeps concurrent API requests from interleaving lines). `summarize(events)` gives p50/p95 latency and
+mean/p95 cost per request and per step. Percentiles use linear interpolation between closest ranks,
+the same method as NumPy's default and `statistics.quantiles(method="inclusive")`; it is written out
+(eight lines) because the standard library refuses fewer than two values, and the tests compare the
+two. A request's latency is its `request` event (wall clock) when present, else the sum of its steps;
+its cost is always the sum of the step events, so a total is never counted twice.
+
+**LLM access (`src/assistant/llm.py`, `src/assistant/fake_llm.py`).** The only door to the OpenAI API.
+`parse(client, ..., output_type)` makes one structured Responses call and returns an `LLMResult`
+(validated output, or a failure: `refusal`, `incomplete`, `invalid_output`); `embed(client, texts)`
+embeds in batches and returns vectors in input order. Both receive the client, the prices, the tracer
+and a clock as parameters, so tests pass `FakeOpenAI` and a fake clock: no network, no key, exact
+latency. Every call writes one trace event, failures included; an unpriced model fails before the
+call; network and API errors are traced and raised as `LLMUnavailable` (Step 9 maps it to 502).
+Cost = uncached input × input price + cached × cached price + output × output price, per 1M tokens,
+in `Decimal`; reasoning tokens are already inside `output_tokens`. `cache_write_tokens`, new in this
+SDK, are not priced (the page lists no write price for our models). The call uses
+`responses.create` with the strict schema from the SDK helper `type_to_text_format_param` (the one
+`responses.parse` uses) and validates the text with our own model: with `responses.parse`, a failing
+cross-field validator raises inside the SDK and the usage of a paid call is lost. The helper is
+private, so `openai` is pinned to `>=3.35.1,<4` and a test builds the format for every LLM output.
+`store=False`: questions and answers are not kept on OpenAI's side. Untrusted text (the question,
+tool and database output) only ever goes in `input`; `instructions` is built from trusted text.
+`fake_llm.py` lives in the package because the demo uses it (and later a dry-run mode); it builds
+replies with the SDK's own response types, so a shape mismatch fails in the tests, not in production.
+It caught one at once: in this SDK, `input_tokens_details.cache_write_tokens` is a required field.
+`llm.py` passed 150 lines, so, as agreed, the cost (`cost_usd`) and the price check (`price_for`) moved
+to `src/assistant/pricing.py`; `llm.py` is now 216 lines, about 55 of them the demo. Latencies are
+rounded to the microsecond so float subtraction noise (9.999... ms) never reaches the trace.
+
+**Outcome (2026-10-19 09:15).** DoD met: with fictitious test prices (1.00 / 0.50 / 4.00 per 1M
+tokens), a fake call of 1,200 input tokens (200 cached) and 300 output tokens costs exactly
+0.0023 USD and takes exactly 250 ms; three calls of 100, 200 and 400 ms give p50 200 ms and p95
+380 ms, read back from the JSONL file. 135 unit tests, no database, no key, no API money spent.
+About 1 h 15 min of the 2 h time box (paused overnight for the `schemas.py` review).
+Open: the real prices are not in `config/pricing.toml` yet, so `python -m assistant.llm --demo`
+stops with "no price for model" until they are (or runs with `--pricing <file>`). They are needed
+before the first real call in Step 5.
