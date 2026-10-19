@@ -14,7 +14,7 @@ You do not need to memorise 17,000 rows. You need to (a) freeze the data, (b) pr
 ## 2. Five rules
 
 1. **Freeze the data.** Give the dataset a version (`DATA_VERSION = "v1"`) and a fingerprint: a SHA-256 of every table in a canonical form (`assistant.fingerprint`; `make dump` writes it to `data/fingerprint.json`). Store the fingerprint in `evals/golden_set.json`. A test rebuilds the data and fails if the fingerprint differs: "the golden set was written for different data, re-verify it". Any change to the generator, even the order of random draws, changes the data.
-2. **Profile before you write.** Generate `docs/data_profile.md` with `scripts/profile_db.py` and read it. Pick cases from facts you can see, not from imagination.
+2. **Profile before you write.** Run the probe queries in section 3 and read the results. Pick cases from facts you can see, not from imagination.
 3. **Write SQL first, then trust it only after verifying it.** The expected result is whatever your hand-written SQL returns, but you confirm it a second way (rule 5 of the checklist in section 8).
 4. **Every trap case must discriminate.** Keep a `naive_sql`, the query a careless system would write, and assert that its result differs from the expected one. If they match, the case tests nothing.
 5. **Avoid fragile cases.** No ties in a top-N, no `LIMIT` without `ORDER BY`, no dependence on the real current date, no unrounded floats.
@@ -119,7 +119,7 @@ Two consequences: "no suppliers" answers are common, so you need both genuine em
 
 ## 4. Decide the definitions once
 
-Write them in `docs/glossary.md` (or a section of this file) before writing any case. They are also what the schema index and the system prompt will carry.
+Write them in `knowledge/glossary.md` before writing any case. The glossary is always part of the SQL-generation instructions, so the cases and the system share one set of definitions.
 
 | Term | Decision to record |
 |---|---|
@@ -179,20 +179,20 @@ Execution match should be strict about values and tolerant about presentation.
 
 ## 7. How many cases, and the split
 
-32 cases, 22 development and 10 holdout, stratified by category so both splits contain every type (the mix in `docs/PLAN.md`, section 8).
+24 cases, 16 development and 8 holdout, stratified by category so both splits contain every type (the mix in `docs/PLAN.md`, section 8).
 
 | Category | Cases |
 |---|---:|
-| Simple lookups (supplier attributes, catalog) | 5 |
-| Aggregation with time filters (spend, counts by year or quarter) | 5 |
-| Multi-table joins (supplier, category, contract) | 4 |
-| Traps (completed-only, currency, `NULL` category, language variants, inactive or blocked, expired contracts, delay) | 7 |
-| Criteria in the question (the ranking criterion is stated by the user) | 3 |
+| Simple lookups (supplier attributes, catalog) | 3 |
+| Aggregation with time filters (spend, counts by year or quarter) | 3 |
+| Multi-table joins (supplier, category, contract) | 3 |
+| Traps (completed-only, currency, `NULL` category, language variants, inactive or blocked, expired contracts, delay) | 6 |
+| Criteria in the question (the ranking criterion is stated by the user) | 2 |
 | Ambiguity needing clarification (two-entity brands, vague criteria, missing period) | 3 |
-| No data: true zero, false zero, unanswerable | 3 |
+| No data: one true zero, one false zero | 2 |
 | Unsafe or out of scope | 2 |
 
-With 32 cases one case is roughly 3.1 percentage points. Report counts ("27 of 32") next to percentages, and per category. With 3 repetitions report the mean pass rate and the share that passed all three.
+With 24 cases one case is roughly 4.2 percentage points. Report counts ("20 of 24") next to percentages, and per category. With 3 repetitions report the mean pass rate and the share that passed all three.
 
 Do not look at the holdout cases' system outputs until Step 10, and do not edit them after seeing results.
 
