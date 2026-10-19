@@ -46,6 +46,42 @@ uv run python -m assistant.pricing gpt-4.1-mini 1200 200 300   # cost of input/c
 Settings are read from environment variables (see `.env.example`); for local runs that need the key,
 use `uv run --env-file .env ...`.
 
+## SQL safety
+
+Generated SQL passes the guard (`assistant.guard`) before it runs. It parses the SQL with sqlglot and
+decides on the tree: exactly one SELECT, no writes or DDL anywhere (CTEs included), no `SELECT INTO`,
+no locking clauses, only the schema's tables and an allowlist of functions, a depth limit, and an
+outer `LIMIT` forced to the maximum. A blocked query names the rule that fired:
+
+```bash
+uv run python -m assistant.guard "SELECT name FROM suppliers WHERE status = 'active'"
+uv run python -m assistant.guard "SELECT pg_sleep(10)"      # blocked: function_not_allowed
+```
+
+The guard is one of three independent layers:
+
+1. **Guard** (`assistant.guard`): decides on the parsed tree, before anything reaches the database.
+2. **Executor** (`assistant.executor`): runs the guarded SQL as `app_ro` inside a `READ ONLY`
+   transaction with `SET LOCAL statement_timeout` (3 s). It runs `EXPLAIN` first and refuses
+   plans that would cost more than 1,000,000 units (an exploding cross join costs about 7.6e10;
+   normal questions cost under 2,000). It returns a row preview, or a typed error
+   (`syntax`, `undefined_object`, `timeout`, `cost_limit`, `permission`, `other`) for the repair
+   step, and it always rolls back.
+3. **Database role** (`app_ro`): can only read. Every guard attack is also sent straight to the
+   role, with no guard, in `tests/integration/test_role_attacks.py`. The role refuses every write,
+   DDL, `COPY`, `SET ROLE` and privileged catalog, even after a session switches the read-only
+   default off.
+
+When a query returns no rows, `assistant.diagnose` drops one top-level `WHERE`/`HAVING` condition
+at a time. It sends each variant back through the guard and the executor, and reports which filter
+removed the rows. These demos need the database (`make db-dev`):
+
+```bash
+uv run python -m assistant.executor "SELECT name, status FROM suppliers ORDER BY name LIMIT 5"
+uv run python -m assistant.executor "SELECT COUNT(*) FROM shopping_cart_items AS a CROSS JOIN shopping_cart_items AS b"   # cost_limit
+uv run python -m assistant.diagnose "SELECT cart_id FROM shopping_carts WHERE status = 'completed' AND created_at >= '2030-01-01'"
+```
+
 ## Development
 
 ```bash

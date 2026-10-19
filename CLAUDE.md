@@ -2,8 +2,8 @@
 
 ## Project
 Procurement Text-to-SQL Assistant: a natural-language interface for business questions about
-supplier and purchasing data. Procurement staff without SQL skills ask a question; an agent writes
-safe, read-only SQL against PostgreSQL, asks for clarification when the question is ambiguous,
+supplier and purchasing data. Procurement staff without SQL skills ask a question; a fixed workflow of
+LLM steps writes safe, read-only SQL against PostgreSQL, asks for clarification when the question is ambiguous,
 and explains the result in plain language with evidence, cost and latency.
 
 Final project of the EDIT Generative AI course (instructor: Luis Noronha), idea 04
@@ -22,22 +22,27 @@ questions, UI text. The user may chat with you in Portuguese; the repository sta
 ## Stack
 - Python 3.12 via uv, src layout, package `assistant`
 - PostgreSQL 16 (Docker Compose), psycopg 3; roles: admin (init only) and `app_ro` (read-only)
-- OpenAI SDK (Responses API) for the LLM and embeddings; OpenAI Agents SDK for variant B only
-- Pydantic for every structured output, sqlglot for the SQL guard, ChromaDB (embedded) for search
-- FastAPI (API), Streamlit (UI, talks to the API over HTTP), pytest, Ruff, pre-commit
+- OpenAI SDK (Responses API) for the LLM and embeddings. No Agents SDK: the optional variant B is a
+  manual tool loop as in course session 7
+- Pydantic for every structured output, sqlglot for the SQL guard
+- Semantic search: plain-Python cosine similarity over committed vectors (no vector database)
+- FastAPI (API), Streamlit (one simple page, talks to the API over HTTP), pytest, Ruff, pre-commit
 
 ## Layout (target, created step by step)
-- `knowledge/`: markdown and YAML that are embedded (schema docs, glossary, example queries)
-- `index/`: committed vectors (`embeddings.json`) and `index_meta.json`; ChromaDB is loaded from them
+- `knowledge/`: markdown and YAML (table docs and example queries are embedded; the glossary is
+  always in the SQL prompt)
+- `index/`: committed vectors (`embeddings.json`) and `index_meta.json`, loaded at startup
+- `prompts/`: the LLM instructions, one Markdown file per step
 - `data/init/`: committed PostgreSQL dump and role script, loaded by the `db` container on first start
 - `data/fingerprint.json`: manifest of the frozen data (version, per-table SHA-256, dump SHA-256)
 - `scripts/build_db.py`: deterministic synthetic data generator (produces the dump);
   `scripts/freeze_data.py` writes the manifest; `scripts/parity_check.py` is the one-off SQLite check
 - `docker-compose.yml` (no DB port published) and `compose.dev.yml` (adds `127.0.0.1:55432`, dev only)
 - `src/assistant/`: fingerprint, config, pricing, llm, fake_llm (offline client for tests and demos),
-  trace, schemas, guard, executor, db, knowledge, tools, intake, pipeline (variant A),
-  agent (variant B), verify, api
-- `ui/streamlit_app.py`; `evals/` (golden_set.json, compare.py, run.py); `config/pricing.toml`
+  trace, schemas, guard, executor, diagnose, knowledge, tools, intake, pipeline (variant A),
+  baseline, verify, cli, api; agent (variant B) only if Step 9 is built
+- `ui/streamlit_app.py`; `evals/` (golden_set.json, compare.py, verify_golden.py, run.py, report.py);
+  `config/pricing.toml`; `scripts/smoke.py`
 - `tests/unit` (no DB, no key), `tests/integration` (needs the compose db), `tests/security`
 - `docs/`: PLAN.md, LOG.md, architecture.md, data_model.md, evaluation.md, results/
 
@@ -67,8 +72,7 @@ uv run pre-commit run --all-files        # every check, as CI runs them
 
 ### LLM calls and cost
 - Every LLM or embedding call goes through `assistant.llm`, which records model, tokens, latency and
-  cost as a trace event. The exception is the Agents SDK run in variant B: read its usage from the
-  run result and convert it to the same trace event.
+  cost as a trace event.
 - Every LLM output is a Pydantic model. Invalid output is handled, never trusted.
 - Prices live in `config/pricing.toml` with an "as of" date. Never hardcode prices.
 - Evaluation runs print a cost estimate and ask for confirmation above a threshold. Use `--max-cases`

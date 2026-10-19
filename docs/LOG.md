@@ -183,3 +183,99 @@ About 1 h 15 min of the 2 h time box (paused overnight for the `schemas.py` revi
 Open: the real prices are not in `config/pricing.toml` yet, so `python -m assistant.llm --demo`
 stops with "no price for model" until they are (or runs with `--pricing <file>`). They are needed
 before the first real call in Step 5.
+
+## Step 3. Safe SQL (started 2026-10-19 evening)
+
+**Prices.** Real prices for `gpt-4.1-mini`, `gpt-4.1` and `text-embedding-3-small` are in
+`config/pricing.toml` (commit 783b574), so the demo and the first real calls have a known cost.
+
+**SQL guard (`src/assistant/guard.py`).** Decides whether SQL written by the LLM may run. Input: the
+SQL text (untrusted) and a `GuardConfig` (table and function allowlists, maximum LIMIT, depth and
+length limits). Output: `GuardedSQL` (the SQL with the outer LIMIT added or lowered) or a
+`GuardViolation` whose `rule` is one of the stable names in `guard.RULES`. The text is parsed once
+with sqlglot (dialect postgres) and every rule looks at the tree, never at the text, so comments and
+quoting cannot change a decision; a parse failure is a violation, not an exception. The SQL that is
+returned is regenerated from the checked tree (comments dropped) and must parse back to the same
+tree, so what runs is exactly what was checked, and a trailing `--` cannot hide the forced LIMIT.
+Allowlists, not denylists: tables come from the real schema (10 tables and 2 views, checked against
+`data/fingerprint.json` by a test), functions are the aggregates, window, date and string helpers
+the questions need, under sqlglot's canonical names (`DATE_TRUNC` is `timestamp_trunc`). The guard
+is one layer: the `app_ro` role and the executor's READ ONLY transaction stay independent of it.
+`sqlglot` is pinned to `>=30.23,<31`: the guard's decisions depend on how the parser builds the tree
+(argument names such as `from_` and `with_` changed between majors), so an upgrade is a deliberate
+step that re-runs the attack tests.
+
+**Guard tests (2026-10-19 night).** `tests/security/test_guard_attacks.py`: 43 attacks, each naming
+its rule, and every rule has at least one; `tests/unit/test_guard.py`: 15 normal queries pass, and
+for each one the output parses to the same tree as the input once the outer LIMIT is removed, and
+checking the output again changes nothing. They found one bug at once: in sqlglot 30, `AND` and
+`OR` are `Func` subclasses, so every query with a condition was blocked as `function_not_allowed`;
+connectors are now skipped. Other findings: sqlglot upper-cases quoted function names
+(`"make_date"` becomes `"MAKE_DATE"`), which the round-trip check catches (fails closed);
+`current_date` and `now()` are not in the allowlist, and the message points at `meta.as_of_date`.
+Left to the other layers, because the guard cannot decide them from the tree alone:
+- An exploding cross join (and `JOIN ... ON true`, and `COUNT(*)` over a huge product, which a LIMIT
+  does not bound): the executor's EXPLAIN cost check and `statement_timeout`.
+- Cost of allowed functions over large inputs (regex is not allowed, but `LIKE` over every line is):
+  the timeout.
+- Casts are not checked by type: `'pg_authid'::regclass` passes and resolves an object id (no rows).
+- Privileges: the guard does not know what `app_ro` may read or write. The role is what refuses
+  writes even if the guard were bypassed (integration tests, next session).
+
+**Executor (`src/assistant/executor.py`, 2026-10-20).** Runs SQL the guard accepted. Input: a
+`GuardedSQL` (never raw LLM text) and an `ExecutorConfig` (timeout, EXPLAIN cost limit, preview
+size); it always connects with `settings.database_url`, which must be `app_ro`, and checks the
+session user again after connecting. Output: `SqlResult` (preview, row count, truncated, time in the
+database) or `SqlError` whose `kind` comes from the SQLSTATE (class 42 is `syntax`, except the
+undefined-object codes and `42501` permission; `57014` is `timeout`; `25006` is `permission`). One
+transaction per query: `BEGIN READ ONLY`, `SET LOCAL statement_timeout`, `EXPLAIN (FORMAT JSON)`
+(above the cost limit it stops with `cost_limit` and never runs the query), the query, then always
+`ROLLBACK`. Statements are sent with `prepare=True`, so PostgreSQL itself rejects a second stacked
+statement even if the guard were skipped. Calibration on the frozen data: the guard's 15 normal
+queries cost 0 to 2,000 units, a two-table cross join 4.4 million and the three-table one 7.6e10;
+the limit is 1,000,000. A database that cannot be reached raises `DatabaseUnavailable` (Step 7 maps
+it to 503) instead of returning an `SqlError`, because the repair loop must not spend LLM calls on
+an outage. Database messages are untrusted data: only the primary message and the hint are kept,
+cut to 300 characters. Tracing stays in the pipeline, which owns the request's tracer.
+
+**Zero-row diagnostic (`src/assistant/diagnose.py`).** Explains an empty result so `no_data` can
+say which filter removed the rows. Input: the guarded SQL that returned zero rows and a runner (the
+executor by default, a fake in unit tests). Output: `NoDataDiagnostic` with one `FilterCheck` per
+top-level condition (the outer SELECT's `WHERE` and `HAVING`, split on `AND`; an `OR` group or a
+parenthesised group stays one filter) and a summary written by code, not by an LLM. Each variant
+drops exactly one condition with sqlglot, goes through the guard again and runs through the
+executor, so the diagnostic has the same limits as any query (EXPLAIN check, timeout, read-only). At
+most 8 filters are checked; a variant that is blocked or fails is reported as not checked.
+`rows_without` counts rows returned, so it is capped by the guard's forced LIMIT (1,000); for a
+diagnostic, "some rows" versus "none" is what matters. Filters inside CTEs or subqueries are not
+split: a first version that stays small and predictable.
+
+**Role tests (`tests/integration/test_role_attacks.py`).** The guard's 43 attacks sent straight to
+`app_ro`, with no guard and no executor, once with the role defaults and once after
+`SET default_transaction_read_only = off`. Every attack is in exactly one group (a test checks), so
+a new guard attack must be classified before the suite passes:
+- 14 writes and DDL (stacked statements, CTE-wrapped writes, `SELECT INTO`, `FOR UPDATE`,
+  `EXPLAIN ANALYZE DELETE` included): `read_only_sql_transaction` with the default, then
+  `insufficient_privilege` without it.
+- 10 privileged operations (`COPY` to a file or program, `SET ROLE`, `set_config('role', ...)`,
+  `pg_authid`, `pg_shadow`, `pg_read_file`, `lo_import`): `insufficient_privilege` in both modes.
+- `GRANT`: accepted with a warning when read-only is off, so the test checks that nothing was granted
+  (no grant by `app_ro` in the ACL, `PUBLIC` still cannot read).
+- 5 slow statements (`pg_sleep` three ways, the `DO` block, the row bomb): cancelled by
+  `statement_timeout`. 2 objects do not exist (`dblink`, the procedure).
+- 11 that the role lets through and the guard must stop, each with its reason: `SET statement_timeout
+  = 0`, `RESET ALL`, `BEGIN`, `information_schema` and `pg_roles` (they show only what `app_ro` may
+  see; passwords are masked), and valid but odd SQL (deep nesting, a long chain, `LIMIT` from a
+  subquery). This is the honest boundary between the layers: the role protects the data, the guard
+  protects the session and the shape of the query.
+Finding: the unicode-escape attack used `\0061` (`a`), so the database looked for `pgauthid`; it is
+now `\005f` (`_`) and the role refuses it as `pg_authid`. The guard blocked both spellings with the
+same rule (`parse_error`); no guard rule changed in this step.
+
+**Outcome (2026-10-20).** DoD met: every guard attack is blocked by its intended rule (43 tests), and
+the role refuses every attack that needs a privilege without the guard, in both transaction modes
+(161 integration tests in about 10 s). The three-table cross join that the guard lets through is
+refused by the executor's EXPLAIN check (cost 7.6e10, limit 1e6), `pg_sleep` past the timeout comes
+back as `timeout`, and the diagnostic names the filter that emptied a real query. 282 unit tests,
+no API money spent. Test files in `tests/unit` and `tests/integration` need different names (no
+`__init__.py`), hence `test_executor_db.py` and `test_diagnose_db.py`.
