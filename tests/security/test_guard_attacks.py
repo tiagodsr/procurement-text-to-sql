@@ -116,7 +116,8 @@ def test_exploding_cross_join_is_left_to_the_executor() -> None:
     """Not decidable by the guard: a cross join of one-row CTEs (as_of_date) is a normal pattern,
     and `JOIN ... ON true` builds the same product, so the guard cannot tell a harmless one from
     17,160^3 rows. It also cannot bound COUNT(*), which returns one row whatever the LIMIT. The
-    executor's EXPLAIN cost check and statement_timeout (Step 3, next session) must stop it."""
+    executor's EXPLAIN cost check stops it: see test_exploding_cross_join_is_stopped_by_the_explain
+    _check in tests/integration/test_executor_db.py."""
     sql = (
         "SELECT COUNT(*) FROM shopping_cart_items AS a CROSS JOIN shopping_cart_items AS b"
         " CROSS JOIN shopping_cart_items AS c"
