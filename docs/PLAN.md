@@ -170,7 +170,7 @@ DoD: `docker compose up -d db` loads the data; parity report identical; tests gr
 DoD: a fake call yields correct cost, latency and p50/p95.
 
 ### Step 3. Safe SQL (Mon night to Tue 10:00)
-- [ ] Real prices for `gpt-4.1-mini` and `text-embedding-3-small` in `config/pricing.toml`.
+- [x] Real prices for `gpt-4.1-mini` and `text-embedding-3-small` in `config/pricing.toml`.
 - [ ] `guard.py` (sqlglot, dialect postgres): one statement, SELECT only (writes, DDL, `COPY`, `SET`
   anywhere, CTEs included), no `SELECT INTO`, no locking clauses, table and function allowlists,
   depth limit, forced outer `LIMIT`, structured `GuardViolation`. No regex for security.

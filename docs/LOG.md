@@ -183,3 +183,24 @@ About 1 h 15 min of the 2 h time box (paused overnight for the `schemas.py` revi
 Open: the real prices are not in `config/pricing.toml` yet, so `python -m assistant.llm --demo`
 stops with "no price for model" until they are (or runs with `--pricing <file>`). They are needed
 before the first real call in Step 5.
+
+## Step 3. Safe SQL (started 2026-10-19 evening)
+
+**Prices.** Real prices for `gpt-4.1-mini`, `gpt-4.1` and `text-embedding-3-small` are in
+`config/pricing.toml` (commit 783b574), so the demo and the first real calls have a known cost.
+
+**SQL guard (`src/assistant/guard.py`).** Decides whether SQL written by the LLM may run. Input: the
+SQL text (untrusted) and a `GuardConfig` (table and function allowlists, maximum LIMIT, depth and
+length limits). Output: `GuardedSQL` (the SQL with the outer LIMIT added or lowered) or a
+`GuardViolation` whose `rule` is one of the stable names in `guard.RULES`. The text is parsed once
+with sqlglot (dialect postgres) and every rule looks at the tree, never at the text, so comments and
+quoting cannot change a decision; a parse failure is a violation, not an exception. The SQL that is
+returned is regenerated from the checked tree (comments dropped) and must parse back to the same
+tree, so what runs is exactly what was checked, and a trailing `--` cannot hide the forced LIMIT.
+Allowlists, not denylists: tables come from the real schema (10 tables and 2 views, checked against
+`data/fingerprint.json` by a test), functions are the aggregates, window, date and string helpers
+the questions need, under sqlglot's canonical names (`DATE_TRUNC` is `timestamp_trunc`). The guard
+is one layer: the `app_ro` role and the executor's READ ONLY transaction stay independent of it.
+`sqlglot` is pinned to `>=30.23,<31`: the guard's decisions depend on how the parser builds the tree
+(argument names such as `from_` and `with_` changed between majors), so an upgrade is a deliberate
+step that re-runs the attack tests.

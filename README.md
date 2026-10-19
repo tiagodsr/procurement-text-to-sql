@@ -46,6 +46,20 @@ uv run python -m assistant.pricing gpt-4.1-mini 1200 200 300   # cost of input/c
 Settings are read from environment variables (see `.env.example`); for local runs that need the key,
 use `uv run --env-file .env ...`.
 
+## SQL safety
+
+Generated SQL passes the guard (`assistant.guard`) before it runs. It parses the SQL with sqlglot and
+decides on the tree: exactly one SELECT, no writes or DDL anywhere (CTEs included), no `SELECT INTO`,
+no locking clauses, only the schema's tables and an allowlist of functions, a depth limit, and an
+outer `LIMIT` forced to the maximum. A blocked query names the rule that fired:
+
+```bash
+uv run python -m assistant.guard "SELECT name FROM suppliers WHERE status = 'active'"
+uv run python -m assistant.guard "SELECT pg_sleep(10)"      # blocked: function_not_allowed
+```
+
+The guard is one layer. The database role `app_ro` can only read, independently of it.
+
 ## Development
 
 ```bash
