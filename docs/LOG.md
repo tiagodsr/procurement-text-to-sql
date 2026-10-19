@@ -249,3 +249,33 @@ most 8 filters are checked; a variant that is blocked or fails is reported as no
 `rows_without` counts rows returned, so it is capped by the guard's forced LIMIT (1,000); for a
 diagnostic, "some rows" versus "none" is what matters. Filters inside CTEs or subqueries are not
 split: a first version that stays small and predictable.
+
+**Role tests (`tests/integration/test_role_attacks.py`).** The guard's 43 attacks sent straight to
+`app_ro`, with no guard and no executor, once with the role defaults and once after
+`SET default_transaction_read_only = off`. Every attack is in exactly one group (a test checks), so
+a new guard attack must be classified before the suite passes:
+- 14 writes and DDL (stacked statements, CTE-wrapped writes, `SELECT INTO`, `FOR UPDATE`,
+  `EXPLAIN ANALYZE DELETE` included): `read_only_sql_transaction` with the default, then
+  `insufficient_privilege` without it.
+- 10 privileged operations (`COPY` to a file or program, `SET ROLE`, `set_config('role', ...)`,
+  `pg_authid`, `pg_shadow`, `pg_read_file`, `lo_import`): `insufficient_privilege` in both modes.
+- `GRANT`: accepted with a warning when read-only is off, so the test checks that nothing was granted
+  (no grant by `app_ro` in the ACL, `PUBLIC` still cannot read).
+- 5 slow statements (`pg_sleep` three ways, the `DO` block, the row bomb): cancelled by
+  `statement_timeout`. 2 objects do not exist (`dblink`, the procedure).
+- 11 that the role lets through and the guard must stop, each with its reason: `SET statement_timeout
+  = 0`, `RESET ALL`, `BEGIN`, `information_schema` and `pg_roles` (they show only what `app_ro` may
+  see; passwords are masked), and valid but odd SQL (deep nesting, a long chain, `LIMIT` from a
+  subquery). This is the honest boundary between the layers: the role protects the data, the guard
+  protects the session and the shape of the query.
+Finding: the unicode-escape attack used `\0061` (`a`), so the database looked for `pgauthid`; it is
+now `\005f` (`_`) and the role refuses it as `pg_authid`. The guard blocked both spellings with the
+same rule (`parse_error`); no guard rule changed in this step.
+
+**Outcome (2026-10-20).** DoD met: every guard attack is blocked by its intended rule (43 tests), and
+the role refuses every attack that needs a privilege without the guard, in both transaction modes
+(161 integration tests in about 10 s). The three-table cross join that the guard lets through is
+refused by the executor's EXPLAIN check (cost 7.6e10, limit 1e6), `pg_sleep` past the timeout comes
+back as `timeout`, and the diagnostic names the filter that emptied a real query. 282 unit tests,
+no API money spent. Test files in `tests/unit` and `tests/integration` need different names (no
+`__init__.py`), hence `test_executor_db.py` and `test_diagnose_db.py`.
