@@ -220,3 +220,12 @@ def test_cli_prints_the_verdict_as_json(monkeypatch, capsys) -> None:
         "sql": "SELECT name FROM suppliers LIMIT 1000",
         "limit": "added",
     }
+
+
+def test_a_round_of_an_average_needs_a_cast_and_the_message_says_so():
+    blocked = check("SELECT ROUND(AVG(actual_days), 1) FROM v_completed_lines")
+    assert isinstance(blocked, GuardViolation) and blocked.rule == "roundtrip_mismatch"
+    assert "::numeric" in blocked.message
+    assert isinstance(
+        check("SELECT ROUND(AVG(actual_days)::numeric, 1) FROM v_completed_lines"), GuardedSQL
+    )
