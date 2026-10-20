@@ -1,21 +1,20 @@
-"""Spec for assistant.llm and assistant.pricing, with a fake client: no network, no key, no cost."""
+"""Spec for assistant.llm and the cost of a call, with a fake client: no network, no key."""
 
 from decimal import Decimal
 
 import pytest
 from openai.lib._parsing._responses import type_to_text_format_param
 
-from assistant.config import Pricing, PricingError
-from assistant.fake_llm import FakeClock, FakeOpenAI, Reply, connection_error
+from assistant.config import Pricing, PricingError, cost_usd
 from assistant.llm import LLMUnavailable, embed, parse
-from assistant.pricing import cost_usd
 from assistant.schemas import LLM_OUTPUTS, IntakeResult
 from assistant.trace import Tracer, read_events, summarize
+from tests.fake_llm import FakeClock, FakeOpenAI, Reply, connection_error
 
 # Round, obviously fictitious prices (USD per 1M tokens): tests never depend on real ones.
 PRICING = Pricing.model_validate(
     {
-        "as_of": "2026-10-18",
+        "as_of": "2000-01-01",
         "source": "https://example.test/pricing",
         "currency": "USD",
         "unit": "per 1M tokens",
@@ -31,7 +30,7 @@ PRICING = Pricing.model_validate(
         },
     }
 )
-VALID = IntakeResult(route="sql", reason="clear", mentions=["Acme"], clarification=None)
+VALID = IntakeResult(route="sql", reason="clear", clarification=None)
 USAGE = {"input_tokens": 1200, "cached_tokens": 200, "output_tokens": 300}
 
 
@@ -49,10 +48,10 @@ def call(client: FakeOpenAI, tracer: Tracer, *, model: str = "test-chat", text: 
     )
 
 
-# --- Definition of done -------------------------------------------------------------------------
+# --- Cost and latency ---------------------------------------------------------------------------
 
 
-def test_dod_a_fake_call_has_exact_cost_and_latency():
+def test_a_fake_call_has_exact_cost_and_latency():
     client = FakeOpenAI([Reply(VALID.model_dump_json(), seconds=0.25, **USAGE)])
     event = call(client, Tracer(None)).event
     # (1000 uncached x 1.00 + 200 cached x 0.50 + 300 output x 4.00) / 1M = 2300 / 1M
@@ -67,7 +66,7 @@ def test_dod_a_fake_call_has_exact_cost_and_latency():
     )
 
 
-def test_dod_three_fake_calls_give_p50_and_p95(tmp_path):
+def test_three_fake_calls_give_p50_and_p95(tmp_path):
     clock = FakeClock()
     seconds = (0.1, 0.2, 0.4)
     client = FakeOpenAI(
@@ -109,7 +108,7 @@ def test_incomplete_output_is_a_failure():
 @pytest.mark.parametrize(
     "text",
     [
-        '{"route": "clarify", "reason": "x", "mentions": [], "clarification": null}',  # rule broken
+        '{"route": "clarify", "reason": "x", "clarification": null}',  # rule broken
         "not json at all",
     ],
     ids=["cross-field-rule", "not-json"],

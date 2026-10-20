@@ -1,68 +1,34 @@
-# Local quality gates. Install once per clone with:  uv run pre-commit install
-#
-# - On `git commit`: fast checks. Formatters fix files in place; if a hook changes
-#   something, the commit stops once: re-stage (`git add -u`) and commit again.
-# - On `git push`: the unit tests (no database, no API key).
-#
-# CI (.github/workflows/ci.yml) runs the same tools, so a skipped hook is still caught.
-default_install_hook_types: [pre-commit, pre-push]
-
+# Checks on every commit. Install once per clone with:  uv run pre-commit install
+# Formatters fix files in place; if a hook changes something, `git add -u` and commit again.
+# CI (.github/workflows/ci.yml) runs Ruff and the unit tests too.
 repos:
-  # GENERAL HYGIENE
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
     hooks:
       - id: no-commit-to-branch
-        name: Git - No direct commits to main
         args: [--branch, main]
       - id: check-added-large-files
-        name: Git - Block large files
         args: [--maxkb=5000]
-      - id: check-merge-conflict
-        name: Git - Merge conflict markers
-      - id: check-yaml
-        name: YAML - Syntax
-      - id: check-toml
-        name: TOML - Syntax
       - id: detect-private-key
-        name: Security - Private keys
       - id: end-of-file-fixer
-        name: Text - Final newline
       - id: trailing-whitespace
-        name: Text - Trailing whitespace
         args: [--markdown-linebreak-ext=md]
 
-  # SECRETS
   - repo: https://github.com/gitleaks/gitleaks
     rev: v8.30.1
     hooks:
       - id: gitleaks
-        name: Security - Gitleaks
 
-  # PYTHON (through uv, so Ruff and pytest are the versions pinned in uv.lock)
+  # Through uv, so Ruff is the version pinned in uv.lock.
   - repo: local
     hooks:
       - id: ruff-check
-        name: Python - Ruff linter
+        name: ruff check
         entry: uv run ruff check --fix --force-exclude
         language: system
         types_or: [python, pyi]
       - id: ruff-format
-        name: Python - Ruff formatter
+        name: ruff format
         entry: uv run ruff format --force-exclude
         language: system
         types_or: [python, pyi]
-      - id: pytest-unit
-        name: Python - Unit tests (pre-push)
-        entry: uv run pytest -q -m "not integration"
-        language: system
-        pass_filenames: false
-        always_run: true
-        stages: [pre-push]
-
-  # GITHUB ACTIONS
-  - repo: https://github.com/rhysd/actionlint
-    rev: v1.7.12
-    hooks:
-      - id: actionlint
-        name: GitHub Actions - Actionlint

@@ -1,8 +1,5 @@
-"""Runtime settings from environment variables, and model prices from config/pricing.toml.
-
-Demo:
-    python -m assistant.config
-"""
+"""Runtime settings from environment variables, model prices from config/pricing.toml, and the
+cost of one API call."""
 
 from __future__ import annotations
 
@@ -116,23 +113,26 @@ def load_pricing(path: Path) -> Pricing:
     return Pricing(as_of=as_of, **meta, **data)
 
 
-def main() -> None:
-    settings = load_settings()
-    for field in Settings.model_fields:
-        value = getattr(settings, field)
-        if isinstance(value, SecretStr):
-            value = "<set>"
-        elif field == "database_url" and (password := urlsplit(value).password):
-            value = value.replace(f":{password}@", ":***@")
-        print(f"{field:16s} {value}")
-    print(f"{'llm_configured':16s} {settings.llm_configured}")
-    pricing = load_pricing(settings.pricing_path)
-    print(
-        f"\nprices as of {pricing.as_of or '(not filled in)'}, {pricing.unit}, {pricing.currency}"
+PER_TOKENS = Decimal(1_000_000)
+
+
+def price_for(pricing: Pricing, model: str, kind: Literal["chat", "embedding"]) -> ModelPrice:
+    """The model's price, checked before any call: unpriced or wrong kind raises PricingError."""
+    price = pricing.price(model)
+    if price.kind != kind:
+        raise PricingError(f"model {model!r} is priced as {price.kind}, not {kind}")
+    return price
+
+
+def cost_usd(
+    price: ModelPrice, *, input_tokens: int, cached_input_tokens: int = 0, output_tokens: int = 0
+) -> Decimal:
+    """USD for one call. Cached input tokens are part of input_tokens; reasoning tokens are part
+    of output_tokens. Without a cached price, cached tokens are billed at the input price."""
+    cached_rate = price.input if price.cached_input is None else price.cached_input
+    total = (
+        (input_tokens - cached_input_tokens) * price.input
+        + cached_input_tokens * cached_rate
+        + output_tokens * (price.output or Decimal(0))
     )
-    for name, price in pricing.models.items():
-        print(f"  {name:28s} {price.model_dump(exclude_none=True)}")
-
-
-if __name__ == "__main__":
-    main()
+    return total / PER_TOKENS

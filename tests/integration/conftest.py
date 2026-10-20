@@ -1,24 +1,15 @@
 """Integration tests run against the compose database, always as the read-only role app_ro.
 
-Start it with `make db-dev`, which runs:
-    docker compose -f docker-compose.yml -f compose.dev.yml up -d --wait db
+Start it with `docker compose up -d --wait db` (published on 127.0.0.1:55432).
 """
 
-import json
 import os
-from pathlib import Path
 
 import psycopg
 import pytest
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_URL = "postgresql://app_ro:app_ro_local@127.0.0.1:55432/procurement"
 DATABASE_URL = os.environ.get("DATABASE_URL", DEFAULT_URL)
-
-
-@pytest.fixture(scope="session")
-def manifest() -> dict:
-    return json.loads((REPO_ROOT / "data" / "fingerprint.json").read_text())
 
 
 @pytest.fixture(scope="session")
@@ -32,6 +23,7 @@ def ro():
     try:
         conn = psycopg.connect(DATABASE_URL, connect_timeout=5)
     except psycopg.OperationalError as exc:
-        pytest.fail(f"database not reachable at {DATABASE_URL}; run `make db-dev` first ({exc})")
+        start = "docker compose up -d --wait db"
+        pytest.fail(f"database not reachable at {DATABASE_URL}; run `{start}` first ({exc})")
     yield conn
     conn.close()

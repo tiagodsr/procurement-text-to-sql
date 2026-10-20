@@ -26,7 +26,7 @@ Rule = Literal[
 ]  # fmt: skip
 RULES: tuple[str, ...] = get_args(Rule)
 
-# The real schema: 10 tables and 2 views in public (a test compares it with data/fingerprint.json).
+# The real schema: 10 tables and 2 views in public (an integration test compares them).
 TABLES = frozenset({
     "catalog_items", "categories", "contracts", "exchange_rates", "meta", "plants",
     "shopping_cart_items", "shopping_carts", "supplier_aliases", "suppliers",

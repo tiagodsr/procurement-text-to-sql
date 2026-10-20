@@ -5,7 +5,7 @@ guard, which would block them first."""
 import pytest
 
 from assistant.executor import DatabaseUnavailable, ExecutorConfig, execute
-from assistant.guard import GuardedSQL, check
+from assistant.guard import TABLES, GuardedSQL, check
 from assistant.schemas import SqlError, SqlResult
 
 pytestmark = pytest.mark.integration
@@ -36,9 +36,15 @@ def test_runs_a_legitimate_query(database_url) -> None:
     assert result.sql.endswith("LIMIT 1000")
 
 
-def test_count_matches_the_frozen_data(database_url, manifest) -> None:
+def test_count_matches_the_data(database_url) -> None:
     result = execute(guarded("SELECT COUNT(*) FROM shopping_cart_items"), database_url=database_url)
-    assert result.rows == [[manifest["tables"]["shopping_cart_items"]["rows"]]]
+    assert result.rows == [[17160]]
+
+
+def test_the_guard_allowlist_is_the_real_schema(database_url) -> None:
+    sql = "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'"
+    result = run(sql, database_url=database_url)
+    assert {row[0] for row in result.rows} == TABLES
 
 
 def test_exploding_cross_join_is_stopped_by_the_explain_check(database_url) -> None:

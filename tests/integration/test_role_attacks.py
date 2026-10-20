@@ -1,9 +1,9 @@
-"""The guard's attacks (tests/security/test_guard_attacks.py) sent straight to app_ro, with no guard
-and no executor: the database role must refuse every one that needs a privilege, by itself, with
-the read-only default on and after a session switches it off. Every attack is classified, so a new
-guard attack fails test_every_guard_attack_is_classified until someone decides what the role does
-with it."""
+"""The database role app_ro by itself, with no guard and no executor: it can read, and it refuses
+the guard's attacks (tests/security/test_guard_attacks.py) that need a privilege, with the read-only
+default on and after a session switches it off. Every attack is classified, so a new guard attack
+fails test_every_guard_attack_is_classified until someone decides what the role does with it."""
 
+import psycopg
 import pytest
 from psycopg import errors
 
@@ -20,12 +20,22 @@ WRITES = {
     "stacked after backslash", "explain analyze", "select into", "for update",
     "for share in a subquery",
 }  # fmt: skip
+# Writes that are not guard attacks (the guard blocks them all as write_or_ddl), so the role is
+# also tested on plain DML and the DDL kinds the attacks do not cover.
+ROLE_ONLY_WRITES = {
+    "insert": "INSERT INTO plants VALUES (99, 'Site 99', 'DE', 'Berlin')",
+    "update": "UPDATE suppliers SET status = 'active'",
+    "create temp table": "CREATE TEMP TABLE scratch (id int)",
+    "create view": "CREATE VIEW v_all AS SELECT 1",
+    "alter table": "ALTER TABLE suppliers ADD COLUMN x int",
+    "comment on": "COMMENT ON TABLE suppliers IS 'changed'",
+}
 # Refused for lack of a privilege whatever the transaction mode.
 PRIVILEGED = {
     "copy to program", "copy to file", "set role", "set_config", "pg_catalog",
     "unqualified catalog", "cte shadowing a catalog", "unicode escape", "read file", "large object",
 }  # fmt: skip
-# Bounded by statement_timeout (the role's 5 s default is tested in test_app_ro.py).
+# Bounded by statement_timeout (the role's own 5 s default is checked below).
 SLOW = {"do block", "pg_sleep", "qualified pg_sleep", "quoted pg_sleep", "row bomb"}
 # Nothing to refuse: the object is not installed.
 MISSING = {"call", "dblink"}
@@ -47,6 +57,30 @@ NOT_THE_ROLES_JOB = {
 GRANT = "grant"  # a non-owner's GRANT is only a warning: the effect is checked instead
 
 
+def test_can_read_tables_and_views(ro) -> None:
+    assert ro.execute("SELECT count(*) FROM shopping_cart_items").fetchone()[0] > 0
+    assert ro.execute("SELECT count(*) FROM v_completed_lines").fetchone()[0] > 0
+
+
+def test_is_app_ro_without_special_attributes(ro) -> None:
+    row = ro.execute(
+        "SELECT current_user, rolsuper, rolcreatedb, rolcreaterole, rolbypassrls "
+        "FROM pg_roles WHERE rolname = current_user"
+    ).fetchone()
+    assert row == ("app_ro", False, False, False, False)
+
+
+def test_role_defaults(ro) -> None:
+    assert ro.execute("SHOW default_transaction_read_only").fetchone()[0] == "on"
+    assert ro.execute("SHOW statement_timeout").fetchone()[0] == "5s"
+
+
+def test_wrong_password_is_rejected(database_url) -> None:
+    bad = database_url.replace("app_ro_local", "wrong")
+    with pytest.raises(psycopg.OperationalError):
+        psycopg.connect(bad, connect_timeout=5)
+
+
 def test_every_guard_attack_is_classified() -> None:
     groups = [WRITES, PRIVILEGED, SLOW, MISSING, set(NOT_THE_ROLES_JOB), {GRANT}]
     names = [name for group in groups for name in group]
@@ -66,7 +100,7 @@ def session(request, ro):
     return ro, request.param
 
 
-@pytest.mark.parametrize("name", sorted(WRITES))
+@pytest.mark.parametrize("name", sorted(WRITES | set(ROLE_ONLY_WRITES)))
 def test_writes_are_refused(session, name) -> None:
     conn, mode = session
     refusal = (
@@ -75,7 +109,7 @@ def test_writes_are_refused(session, name) -> None:
         else errors.InsufficientPrivilege
     )
     with pytest.raises(refusal):
-        conn.execute(SQL[name])
+        conn.execute({**SQL, **ROLE_ONLY_WRITES}[name])
 
 
 @pytest.mark.parametrize("name", sorted(PRIVILEGED))

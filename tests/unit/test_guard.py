@@ -3,17 +3,14 @@ The attacks are in tests/security/test_guard_attacks.py."""
 
 import json
 import sys
-from pathlib import Path
 
 import pytest
 import sqlglot
 from pydantic import ValidationError
 
 from assistant import guard
-from assistant.guard import RULES, TABLES, GuardConfig, GuardedSQL, check
+from assistant.guard import RULES, GuardConfig, GuardedSQL, check
 from assistant.schemas import GuardViolation
-
-REPO_ROOT = Path(__file__).resolve().parents[2]
 
 # Queries like the ones the generator should write for this schema.
 LEGITIMATE = {
@@ -190,11 +187,6 @@ def test_empty_or_broken_sql_is_a_violation_not_an_exception(sql: str) -> None:
     result = check(sql)
     assert isinstance(result, GuardViolation)
     assert result.rule in ("parse_error", "statement_count")
-
-
-def test_table_allowlist_is_the_real_schema() -> None:
-    manifest = json.loads((REPO_ROOT / "data" / "fingerprint.json").read_text())
-    assert set(manifest["tables"]) | set(manifest["views"]) == TABLES
 
 
 def test_rule_names_are_stable() -> None:

@@ -1,20 +1,12 @@
-"""Pydantic contracts shared by every step: request, LLM outputs, tool results, trace events and
-the final answer. The validators of FinalAnswer enforce the status rules of docs/PLAN.md section 5.
-
-Demo:
-    python -m assistant.schemas FinalAnswer     # JSON schema of one model
-    python -m assistant.schemas --examples      # one valid FinalAnswer per status
-"""
+"""Pydantic contracts shared by every step: request, LLM outputs, execution results, trace events
+and the final answer. The validators of FinalAnswer enforce the rules of each answer status."""
 
 from __future__ import annotations
 
-import argparse
-import json
-import sys
 from datetime import UTC, datetime
 from typing import Literal, Self, get_args
 
-from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 AnswerStatus = Literal[
     "answered", "needs_clarification", "no_data", "out_of_scope", "refused", "error"
@@ -23,16 +15,15 @@ StepStatus = Literal[
     "ok", "refusal", "invalid_output", "incomplete", "upstream_error", "blocked", "error"
 ]
 Step = Literal[
-    "intake", "retrieve", "resolve_entity", "generate_sql", "repair_sql", "guard",
-    "execute", "verify", "explain", "agent", "embed", "request",
+    "intake", "retrieve", "generate_sql", "repair_sql", "guard", "execute", "explain", "embed",
+    "request",
 ]  # fmt: skip
-Variant = Literal["baseline", "A", "B"]
+Variant = Literal["workflow", "baseline"]
 JsonScalar = str | int | float | bool | None
 
 MAX_QUESTION_CHARS = 500
 MAX_CLARIFICATION_CHARS = 200
 MAX_OPTIONS = 6
-MAX_MENTIONS = 5
 
 
 class Contract(BaseModel):
@@ -50,7 +41,6 @@ def _not_blank(value: str, name: str) -> str:
 
 class QueryRequest(Contract):
     question: str
-    variant: Variant = "A"
     clarification: str | None = None  # the user's reply to a clarification question (untrusted)
 
     @field_validator("question")
@@ -96,14 +86,11 @@ class Clarification(Contract):
 class IntakeResult(Contract):
     route: Literal["sql", "clarify", "out_of_scope", "unsafe"]
     reason: str
-    mentions: list[str]  # names of suppliers, categories or plants, for resolve_entity
     clarification: Clarification | None
 
     @model_validator(mode="after")
     def _route(self) -> Self:
         _not_blank(self.reason, "reason")
-        if len(self.mentions) > MAX_MENTIONS:
-            raise ValueError(f"at most {MAX_MENTIONS} mentions")
         if (self.route == "clarify") != (self.clarification is not None):
             raise ValueError("route 'clarify' needs a clarification, and only that route has one")
         return self
@@ -140,7 +127,7 @@ LLM_OUTPUTS: tuple[type[Contract], ...] = (
 )
 
 
-# --- tools and execution ---------------------------------------------------------------------
+# --- retrieval and execution -----------------------------------------------------------------
 
 
 class RetrievedDoc(Contract):
@@ -149,25 +136,6 @@ class RetrievedDoc(Contract):
     doc_type: Literal["table", "glossary", "example"]
     table: str | None = None
     source: str
-
-
-class SchemaContext(Contract):
-    query: str
-    docs: list[RetrievedDoc]
-
-    @model_validator(mode="after")
-    def _ranked(self) -> Self:
-        scores = [doc.score for doc in self.docs]
-        if scores != sorted(scores, reverse=True):
-            raise ValueError("docs must be sorted by score, highest first")
-        return self
-
-
-class EntityCandidate(Contract):
-    kind: Literal["supplier", "category", "plant"]
-    id: int
-    name: str
-    matched: str  # the name or alias that matched the mention
 
 
 class GuardViolation(Contract):
@@ -220,27 +188,11 @@ class NoDataDiagnostic(Contract):
         return _not_blank(value, "summary")
 
 
-# --- verification, errors, usage, final answer -----------------------------------------------
-
-
-class CheckResult(Contract):
-    name: str
-    passed: bool
-    detail: str = ""
-
-
-class Confidence(Contract):
-    score: float = Field(ge=0, le=1)
-    checks: list[CheckResult] = []
-
-    @computed_field
-    @property
-    def level(self) -> Literal["high", "medium", "low"]:
-        return "high" if self.score >= 0.8 else "medium" if self.score >= 0.5 else "low"
+# --- errors, usage, final answer -------------------------------------------------------------
 
 
 class ErrorInfo(Contract):
-    kind: Literal["max_steps", "max_retries", "timeout", "budget", "upstream", "invalid_output"]
+    kind: Literal["max_retries", "timeout", "upstream", "invalid_output"]
     message: str
 
 
@@ -301,7 +253,6 @@ class FinalAnswer(Contract):
     evidence: list[RetrievedDoc] = []
     cited_rows: list[int] = []
     assumptions: list[str] = []
-    confidence: Confidence | None = None
     error: ErrorInfo | None = None
     usage: RequestUsage = RequestUsage()
 
@@ -336,45 +287,3 @@ class FinalAnswer(Contract):
         ):
             raise ValueError(f"status {status!r} means no SQL was executed, but the trace has one")
         return self
-
-
-def examples() -> dict[str, FinalAnswer]:
-    """One valid FinalAnswer per status (demo and test fixtures)."""
-    sql = "SELECT COUNT(*) FROM suppliers LIMIT 100"
-    base = {"request_id": "demo", "question": "How many suppliers do we have?", "variant": "A"}
-    shape = {"sql": sql, "columns": ["count"], "truncated": False, "db_ms": 2.0}
-    one_row = SqlResult(rows=[[96]], row_count=1, **shape)
-    no_rows = SqlResult(rows=[], row_count=0, **shape)
-    clarify = Clarification(question="Which one?", reason="entity_ambiguity", options=["A", "B"])
-    gap = NoDataDiagnostic(summary="The year filter removed every row.")
-    cases = {
-        "answered": {"answer": "96 suppliers.", "sql": sql, "result": one_row, "cited_rows": [0]},
-        "no_data": {"answer": "No rows.", "sql": sql, "result": no_rows, "diagnostic": gap},
-        "needs_clarification": {"answer": clarify.question, "clarification": clarify},
-        "out_of_scope": {"answer": "I only answer questions about procurement data."},
-        "refused": {"answer": "I can only read data, not change it."},
-        "error": {
-            "answer": "I could not answer within the limits.",
-            "error": ErrorInfo(kind="max_retries", message="SQL failed twice"),
-        },
-    }
-    return {s: FinalAnswer(status=s, **base, **fields) for s, fields in cases.items()}
-
-
-def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("model", nargs="?", help="model name, e.g. FinalAnswer")
-    parser.add_argument("--examples", action="store_true", help="print one answer per status")
-    args = parser.parse_args()
-    if args.examples:
-        for status, answer in examples().items():
-            print(f"{status:20s} {answer.model_dump_json(exclude_defaults=True)}")
-        return
-    model = globals().get(args.model or "")
-    if not (isinstance(model, type) and issubclass(model, Contract)):
-        sys.exit(f"unknown model {args.model!r}")
-    print(json.dumps(model.model_json_schema(), indent=2))
-
-
-if __name__ == "__main__":
-    main()

@@ -1,25 +1,18 @@
 """The one door to the OpenAI API: structured calls and embeddings, each traced with tokens,
-latency and cost. The client is always a parameter, so tests pass assistant.fake_llm.FakeOpenAI.
-
-Demo (fake client, no key, no cost; needs the prices in config/pricing.toml):
-    python -m assistant.llm --demo
-"""
+latency and cost. The client is always a parameter, so tests pass an offline fake."""
 
 from __future__ import annotations
 
-import argparse
-import sys
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any, Literal
 
 import openai
-from openai.lib._parsing._responses import type_to_text_format_param  # private: see docs/LOG.md
+from openai.lib._parsing._responses import type_to_text_format_param  # private: DECISIONS.md
 from pydantic import BaseModel, ValidationError
 
-from assistant.config import Pricing, PricingError, Settings
-from assistant.pricing import cost_usd, price_for
+from assistant.config import Pricing, Settings, cost_usd, price_for
 from assistant.schemas import Step, TraceEvent
 from assistant.trace import Tracer
 
@@ -162,59 +155,3 @@ def embed(
             raise LLMUnavailable(f"{model}: {len(data)} vectors for {len(batch)} texts")
         vectors.extend(d.embedding for d in data)
     return vectors
-
-
-def demo(pricing_path: str | None = None) -> None:
-    """Three fake intake calls (100, 200, 400 ms): event, cost and latency, then p50/p95."""
-    from pathlib import Path
-
-    from assistant.config import load_pricing, load_settings
-    from assistant.fake_llm import FakeClock, FakeOpenAI, Reply
-    from assistant.schemas import IntakeResult
-    from assistant.trace import format_summary, summarize
-
-    settings = load_settings()
-    pricing = load_pricing(Path(pricing_path) if pricing_path else settings.pricing_path)
-    intake = IntakeResult(route="sql", reason="clear", mentions=[], clarification=None)
-    usage = {"input_tokens": 1200, "cached_tokens": 200, "output_tokens": 300}
-    replies = [Reply(intake.model_dump_json(), seconds=s, **usage) for s in (0.1, 0.2, 0.4)]
-    clock = FakeClock()
-    client = FakeOpenAI(replies, clock)
-    events = []
-    for _ in replies:
-        tracer = Tracer(settings.trace_dir, variant="A")
-        result = parse(
-            client,
-            step="intake",
-            model=settings.llm_model,
-            instructions="Classify the procurement question.",
-            input="How many suppliers do we have?",
-            output_type=IntakeResult,
-            pricing=pricing,
-            tracer=tracer,
-            clock=clock,
-        )
-        e = result.event
-        print(
-            f"{e.request_id[:8]}  {e.model}  in={e.input_tokens} cached={e.cached_input_tokens} "
-            f"out={e.output_tokens}  ${e.cost_usd:.6f}  {e.latency_ms:.0f} ms  -> {result.output}"
-        )
-        events.append(e)
-    print(f"\n{format_summary(summarize(events))}\n\nevents appended under {settings.trace_dir}")
-
-
-def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--demo", action="store_true", help="three fake calls, no API key")
-    parser.add_argument("--pricing", help="pricing TOML to use instead of config/pricing.toml")
-    args = parser.parse_args()
-    if not args.demo:
-        parser.error("only --demo is available; real calls are made by the pipeline")
-    try:
-        demo(args.pricing)
-    except PricingError as exc:
-        sys.exit(f"{exc}. Fill in config/pricing.toml (or pass --pricing) first.")
-
-
-if __name__ == "__main__":
-    main()

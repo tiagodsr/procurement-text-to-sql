@@ -22,7 +22,7 @@ module-name = "assistant"
 testpaths = ["tests"]
 pythonpath = ["."]
 markers = [
-    "integration: needs the compose database (docker compose -f docker-compose.yml -f compose.dev.yml up -d db)",
+    "integration: needs the compose database (docker compose up -d --wait db)",
 ]
 
 [tool.ruff]
