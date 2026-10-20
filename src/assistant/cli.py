@@ -45,7 +45,7 @@ def render(final: FinalAnswer) -> str:
             continue
         tokens = f"{e.input_tokens:>6} in {e.output_tokens:>5} out" if e.kind != "tool" else ""
         lines.append(
-            f"  {e.step:13s} {e.status:8s} {e.model or '':14s} {tokens:20s}"
+            f"  {e.step:13s} {e.status:8s} {e.model or '':22s} {tokens:20s}"
             f" ${e.cost_usd:.6f} {e.latency_ms:>9.1f} ms"
         )
     lines.append(
