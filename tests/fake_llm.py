@@ -14,6 +14,28 @@ import openai
 from openai.types import CreateEmbeddingResponse
 from openai.types.responses import Response
 
+from assistant.config import Pricing
+
+# Round, obviously fictitious prices (USD per 1M tokens): tests never depend on real ones.
+PRICING = Pricing.model_validate(
+    {
+        "as_of": "2000-01-01",
+        "source": "https://example.test/pricing",
+        "currency": "USD",
+        "unit": "per 1M tokens",
+        "models": {
+            "test-chat": {
+                "kind": "chat",
+                "input": "1.00",
+                "cached_input": "0.50",
+                "output": "4.00",
+            },
+            "test-nocache": {"kind": "chat", "input": "2.00", "output": "8.00"},
+            "test-embed": {"kind": "embedding", "input": "0.10"},
+        },
+    }
+)
+
 
 class FakeClock:
     def __init__(self, start: float = 0.0) -> None:

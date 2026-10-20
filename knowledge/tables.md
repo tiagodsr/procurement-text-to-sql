@@ -40,8 +40,11 @@ Contracts, catalog items and cart lines always reference a leaf. To roll up to a
 
 ## supplier_aliases
 81 rows. `alias_id`, `supplier_id`, `alias`. Each alias is either a short brand (`Velria`) or the
-name without its legal suffix (`Dovtor Supply`). Not every supplier has an alias. An alias can map to
-more than one supplier (sister entities: see the glossary).
+name without its legal suffix (`Dovtor Supply`). Not every supplier has an alias, and some have two.
+An alias can map to more than one supplier (sister entities: see the glossary). Because a supplier
+can have two aliases, never join this table into purchase lines: pick the suppliers with
+`supplier_id IN (SELECT supplier_id FROM supplier_aliases WHERE alias ILIKE ...)`, or the lines of a
+supplier with two matching aliases are counted twice.
 
 ## contracts
 117 rows.

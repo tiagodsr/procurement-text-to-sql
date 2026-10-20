@@ -47,6 +47,32 @@ the guard and the executor again, and reports which filter removed every row. Th
 by code, not by an LLM, so `no_data` always says why. At most 8 filters are checked; filters inside
 subqueries are not split.
 
+## Workflow
+
+- **Fixed steps, no agent.** `workflow.py` runs intake, SQL, guard, execute, repair and explain in a
+  fixed order, and every exit (clarification, no data, out of scope, refused, error) is code.
+- **Intake decides before any SQL.** It routes to `sql`, `clarify`, `out_of_scope` or `unsafe`.
+  It asks only about sister brands and vague judgements; any other missing detail gets a default
+  that the SQL step states as an assumption.
+- **Sister brands are a list, not a tool.** Glossary rule 6 lists the six brands with two legal
+  entities, so intake sees them in its instructions and no entity-resolution step is needed. An
+  integration test checks the list against `supplier_aliases`.
+- **One SQL prompt for generation and repair.** A repair is the same instructions with the failed SQL
+  and the error added to the input, so the two cannot drift apart. At most two repairs.
+- **A guard block that means "write" is refused at once.** `write_or_ddl`, `not_select`,
+  `select_into` and `locking_clause` end as `refused` with nothing executed; other blocks (a clock
+  function, an unknown table) go to repair like a database error.
+- **Empty means no rows or one row of nulls.** `SUM` over no rows returns one null row, so a total
+  for 2030 is `no_data` with its diagnostic, not an answer of "null". `no_data` has no explain call:
+  the diagnostic summary is the answer.
+- **Refusals.** A model refusal before any rows were read ends as `refused`; after that (in explain)
+  it is an `error`. `refused` and `out_of_scope` never return rows; a failed query before a refusal
+  is allowed in the trace.
+- **Citations are checked.** An explanation that cites a row the result does not have is an
+  `invalid_output` error, never shown.
+- **Supplier matching never joins aliases into lines.** Some suppliers have two aliases, so a join
+  counts their lines twice; the prompt and `tables.md` ask for `supplier_id IN (...)`.
+
 ## LLM calls
 
 - **One door.** Every call goes through `llm.py`, which records model, tokens, latency and cost as a

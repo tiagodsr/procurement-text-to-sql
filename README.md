@@ -8,6 +8,44 @@ Final project of the EDIT Generative AI course (idea 04, "Text-to-SQL Assistant"
 fully synthetic. The plan is in [docs/PLAN.md](docs/PLAN.md) and the design decisions are in
 [docs/DECISIONS.md](docs/DECISIONS.md).
 
+## Ask a question
+
+```bash
+docker compose up -d --wait db
+cp .env.example .env                     # then set OPENAI_API_KEY
+uv run --env-file .env ask "Which five suppliers had the highest spend in 2025?"
+uv run --env-file .env ask "How much did we spend with Velria last year?"   # asks which Velria
+uv run --env-file .env ask "How much did we spend with Velria last year?" --clarification "Both"
+```
+
+The answer comes with its status, the assumptions the SQL made, the SQL that ran, the rows (cited
+rows marked) and one trace line per step with model, tokens, cost and latency. `--json` prints the
+full answer.
+
+## How a question is answered
+
+```text
+question -> intake LLM: sql | clarify | out_of_scope | unsafe
+         -> SQL LLM (glossary and table docs in the instructions)
+         -> guard -> read-only execute
+         -> guard block or SQL error: the same SQL LLM repairs it, with the error (max 2)
+         -> empty result: which filter removed the rows (code, no LLM) -> no_data
+         -> explain LLM -> answer citing rows
+```
+
+| Status | When |
+|---|---|
+| `answered` | the query returned rows and the explanation cites them |
+| `needs_clarification` | the question names a sister brand without the entity, or a vague judgement ("best supplier") |
+| `no_data` | the query returned nothing; the answer names the filter that removed every row |
+| `out_of_scope` | not about the procurement data |
+| `refused` | asks to change data, read system information or override the rules; or the SQL tried to write |
+| `error` | the SQL still failed after two repairs, an LLM output was unusable, or a service was down |
+
+The prompts are in [prompts/](prompts/). The question, the clarification, database errors and rows
+only ever go in the `input` of a call; the `instructions` are built from the prompts and
+`knowledge/` alone.
+
 ## Requirements
 
 - [uv](https://docs.astral.sh/uv/) (installs Python 3.12 for you)
@@ -69,6 +107,9 @@ when a command needs the API key.
 
 ```text
 src/assistant/
+  cli.py           `ask`: one question in the terminal, with SQL, rows and trace
+  workflow.py      the fixed workflow and its exits for every status
+  prompts.py       builds each step's instructions from prompts/ and knowledge/
   config.py        settings from the environment, model prices and the cost of a call
   schemas.py       Pydantic contracts and the rules of each answer status
   llm.py           the only door to OpenAI: structured calls and embeddings, traced
@@ -76,16 +117,17 @@ src/assistant/
   guard.py         SQL guard on the parsed tree: one SELECT, allowlists, forced LIMIT
   executor.py      read-only transaction as app_ro, timeout, EXPLAIN cost check
   diagnose.py      zero rows: which filter removed them
+prompts/           intake.md, sql.md (generate and repair), explain.md
 knowledge/
   tables.md        one section per table and view
-  glossary.md      business rules that every query must follow
+  glossary.md      business rules that every query must follow, with the sister brands
 config/pricing.toml  model prices (USD per 1M tokens) with their as_of date
 data/init/         the synthetic data dump and the read-only role, loaded on the db's first start
 scripts/build_db.py  the seeded generator that produced the dump
 tests/
   unit/            no database, no API key
   security/        guard attacks, each naming the rule that must block it
-  integration/     executor, diagnostic and role attacks against the db
+  integration/     executor, diagnostic, role attacks and the glossary against the db
   fake_llm.py      offline stand-in for the OpenAI client
 docs/
   PLAN.md          goal, flow and phases
