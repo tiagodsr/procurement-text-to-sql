@@ -5,10 +5,14 @@ description = "Natural-language questions over synthetic procurement data, answe
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 dependencies = [
+    "fastapi>=0.156.3",
+    "httpx>=0.28.1",
     "openai>=3.35.1,<4",
     "psycopg[binary]>=3.3.6",
     "pydantic>=2.14.1,<3",
     "sqlglot>=30.23,<31",
+    "streamlit>=1.66.0",
+    "uvicorn>=0.54.0",
 ]
 
 [project.scripts]

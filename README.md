@@ -8,7 +8,21 @@ Final project of the EDIT Generative AI course (idea 04, "Text-to-SQL Assistant"
 fully synthetic. The plan is in [docs/PLAN.md](docs/PLAN.md) and the design decisions are in
 [docs/DECISIONS.md](docs/DECISIONS.md).
 
-## Ask a question
+## Run it
+
+```bash
+cp .env.example .env                  # then set OPENAI_API_KEY
+docker compose up --build --wait      # db, api and ui
+```
+
+Open the page at <http://localhost:8501> and the API docs at <http://localhost:8000/docs>.
+`docker compose down` stops everything (add `-v` to delete the database volume). The ports are
+published on `127.0.0.1` only, because the API spends the key's money and has no login. Without a
+key everything still starts: the page shows a warning and the API answers `503` to a question.
+Inside compose the api reaches the database as `db:5432`; only `OPENAI_API_KEY`, `LLM_MODEL`,
+`EMBEDDING_MODEL` and `LLM_TIMEOUT_S` are taken from `.env`.
+
+## Ask in the terminal
 
 ```bash
 docker compose up -d --wait db
@@ -22,6 +36,41 @@ The answer comes with its status, the assumptions the SQL made, the evidence (th
 search found, with their scores), the SQL that ran, the rows (cited rows marked) and one trace line
 per step with model, tokens, cost and latency. `--json` prints the full answer. A question costs
 about 0.002 USD with `gpt-4.1-mini` and takes 1 to 5 seconds.
+
+## API
+
+Compose runs this; to run it on the host (the db must be up):
+
+```bash
+uv run --env-file .env uvicorn assistant.api:app      # http://127.0.0.1:8000, interactive docs at /docs
+curl -s localhost:8000/health
+curl -s -X POST localhost:8000/v1/query -H 'content-type: application/json' \
+  -d '{"question": "Which five suppliers had the highest spend in 2025?"}'
+```
+
+`POST /v1/query` takes `question` and, to reply to a clarification, `clarification` (the option
+chosen). The response is the same answer as the terminal one, as JSON: `status`, `answer`, `sql`,
+`result` (columns and rows), `cited_rows`, `evidence` (documents with scores), `assumptions`,
+`caveats`, and `usage` with the `cost_usd`, the `latency_ms` and every step of the trace. Every
+workflow outcome is a `200` with its status (a failed service is status `error`, with the cost
+spent so far). A missing `OPENAI_API_KEY` is `503` and an invalid request is `422`.
+
+`GET /health` always answers while the API is up and says what a question needs:
+`{"status": "ok", "llm_configured": true, "database": true}`.
+
+## The page
+
+Compose runs this too; on the host, with the API up:
+
+```bash
+uv run streamlit run src/assistant/ui.py              # http://localhost:8501
+```
+
+One page over HTTP (`API_URL`, default `http://127.0.0.1:8000`). It shows what the API returns: the
+status, the answer, cost and latency, the SQL, the rows (cited ones marked), the evidence and the
+trace. A clarification is answered with one button per option. Rows are not shown when there are
+none (`no_data` shows which filter removed them instead). A warning appears, and Ask is disabled,
+when the API is not reachable, has no `OPENAI_API_KEY` or cannot reach the database.
 
 ## How a question is answered
 
@@ -113,7 +162,7 @@ uv run python -m assistant.diagnose "SELECT cart_id FROM shopping_carts WHERE st
 ```bash
 uv sync                                  # create the environment
 uv run pre-commit install                # install the git hooks (once per clone)
-uv run pytest -q -m "not integration"    # unit and security tests, no database, no API key
+uv run pytest -q -m "not integration"    # unit, API, page and security tests: no database, no API key
 uv run pytest -q -m integration          # executor, diagnostic and role tests (needs the db)
 uv run pre-commit run --all-files        # whitespace, secrets, Ruff
 make dump                                # regenerate the data dump in a throwaway container
@@ -127,6 +176,8 @@ when a command needs the API key.
 ```text
 src/assistant/
   cli.py           `ask`: one question in the terminal, with SQL, rows and trace
+  api.py           FastAPI: `GET /health` and `POST /v1/query`
+  ui.py            the Streamlit page, which asks the API over HTTP
   workflow.py      the fixed workflow and its exits for every status
   retrieve.py      semantic search: documents, committed vectors, cosine, recall
   prompts.py       builds each step's instructions from prompts/ and knowledge/
@@ -155,7 +206,8 @@ tests/
 docs/
   PLAN.md          goal, flow and phases
   DECISIONS.md     design decisions and why
-docker-compose.yml   the db service (127.0.0.1:55432)
+Dockerfile       one image for the api and the ui (uv, locked dependencies)
+docker-compose.yml   db (127.0.0.1:55432), api (:8000) and ui (:8501)
 Makefile         `make dump`, `make index`, `make recall`
 .github/workflows/ci.yml  Ruff and unit tests on every push
 var/             runtime output, git-ignored (traces/*.jsonl)

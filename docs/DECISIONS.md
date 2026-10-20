@@ -73,6 +73,35 @@ subqueries are not split.
 - **Supplier matching never joins aliases into lines.** Some suppliers have two aliases, so a join
   counts their lines twice; the prompt and `tables.md` ask for `supplier_id IN (...)`.
 
+## Demo surface
+
+- **The API returns the workflow's answer as it is.** `POST /v1/query` responds with the
+  `FinalAnswer` contract, so the status rules, the evidence, the trace, the cost and the latency
+  are the ones the tests already check, and the terminal and the API cannot drift apart.
+- **Every outcome is a 200 with a status.** `error` is an answer too: it keeps the trace and the
+  cost spent before the failure. Only a request that cannot run is an HTTP error: a missing key is
+  503, an invalid request is 422.
+- **The API starts without a key.** The workflow's dependencies are built on the first question, so
+  `GET /health` answers either way and says `llm_configured` and `database`. The page reads it to
+  warn before anyone asks.
+
+- **The page is a client of the API, nothing more.** It validates the response with the same
+  `FinalAnswer` model, so a changed contract fails loudly instead of showing half an answer. It
+  keeps no workflow logic: the clarification buttons send the chosen option as `clarification`, as
+  any API client would. It is tested offline with Streamlit's `AppTest` against a fake API.
+- **No empty table.** For `no_data` the page shows the per-filter diagnostic instead of the empty
+  rows, because a table with a header and no rows looks like a broken page.
+
+- **One image, three services.** The api and the ui run the same image (uv with the locked
+  dependencies, installed in a layer before the code), so there is one build and the page cannot
+  import a different version of the contract than the API serves. `.dockerignore` lets in only
+  what the Dockerfile copies, so `.env` never enters the image.
+- **Compose passes four variables, not `.env`.** `.env` holds the host's `DATABASE_URL`
+  (`127.0.0.1:55432`), which is wrong inside the network, so the api gets `db:5432` explicitly plus
+  the key and the model names. The key is read at run time and is not in the image.
+- **Ports on loopback.** The API has no login and every question spends the key's money, so the
+  api and the ui are published on `127.0.0.1` only, like the database.
+
 ## LLM calls
 
 - **One door.** Every call goes through `llm.py`, which records model, tokens, latency and cost as a
