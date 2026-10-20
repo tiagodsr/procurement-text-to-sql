@@ -92,6 +92,16 @@ subqueries are not split.
 - **No empty table.** For `no_data` the page shows the per-filter diagnostic instead of the empty
   rows, because a table with a header and no rows looks like a broken page.
 
+- **One image, three services.** The api and the ui run the same image (uv with the locked
+  dependencies, installed in a layer before the code), so there is one build and the page cannot
+  import a different version of the contract than the API serves. `.dockerignore` lets in only
+  what the Dockerfile copies, so `.env` never enters the image.
+- **Compose passes four variables, not `.env`.** `.env` holds the host's `DATABASE_URL`
+  (`127.0.0.1:55432`), which is wrong inside the network, so the api gets `db:5432` explicitly plus
+  the key and the model names. The key is read at run time and is not in the image.
+- **Ports on loopback.** The API has no login and every question spends the key's money, so the
+  api and the ui are published on `127.0.0.1` only, like the database.
+
 ## LLM calls
 
 - **One door.** Every call goes through `llm.py`, which records model, tokens, latency and cost as a

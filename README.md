@@ -8,7 +8,21 @@ Final project of the EDIT Generative AI course (idea 04, "Text-to-SQL Assistant"
 fully synthetic. The plan is in [docs/PLAN.md](docs/PLAN.md) and the design decisions are in
 [docs/DECISIONS.md](docs/DECISIONS.md).
 
-## Ask a question
+## Run it
+
+```bash
+cp .env.example .env                  # then set OPENAI_API_KEY
+docker compose up --build --wait      # db, api and ui
+```
+
+Open the page at <http://localhost:8501> and the API docs at <http://localhost:8000/docs>.
+`docker compose down` stops everything (add `-v` to delete the database volume). The ports are
+published on `127.0.0.1` only, because the API spends the key's money and has no login. Without a
+key everything still starts: the page shows a warning and the API answers `503` to a question.
+Inside compose the api reaches the database as `db:5432`; only `OPENAI_API_KEY`, `LLM_MODEL`,
+`EMBEDDING_MODEL` and `LLM_TIMEOUT_S` are taken from `.env`.
+
+## Ask in the terminal
 
 ```bash
 docker compose up -d --wait db
@@ -24,6 +38,8 @@ per step with model, tokens, cost and latency. `--json` prints the full answer. 
 about 0.002 USD with `gpt-4.1-mini` and takes 1 to 5 seconds.
 
 ## API
+
+Compose runs this; to run it on the host (the db must be up):
 
 ```bash
 uv run --env-file .env uvicorn assistant.api:app      # http://127.0.0.1:8000, interactive docs at /docs
@@ -44,8 +60,10 @@ spent so far). A missing `OPENAI_API_KEY` is `503` and an invalid request is `42
 
 ## The page
 
+Compose runs this too; on the host, with the API up:
+
 ```bash
-uv run streamlit run src/assistant/ui.py              # http://localhost:8501, the API must be up
+uv run streamlit run src/assistant/ui.py              # http://localhost:8501
 ```
 
 One page over HTTP (`API_URL`, default `http://127.0.0.1:8000`). It shows what the API returns: the
@@ -188,7 +206,8 @@ tests/
 docs/
   PLAN.md          goal, flow and phases
   DECISIONS.md     design decisions and why
-docker-compose.yml   the db service (127.0.0.1:55432)
+Dockerfile       one image for the api and the ui (uv, locked dependencies)
+docker-compose.yml   db (127.0.0.1:55432), api (:8000) and ui (:8501)
 Makefile         `make dump`, `make index`, `make recall`
 .github/workflows/ci.yml  Ruff and unit tests on every push
 var/             runtime output, git-ignored (traces/*.jsonl)

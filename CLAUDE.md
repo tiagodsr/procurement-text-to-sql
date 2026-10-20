@@ -72,6 +72,7 @@ OpenAI Responses API (no Agents SDK); Pydantic; sqlglot; FastAPI; Streamlit over
 ```bash
 uv sync                                  # environment
 docker compose up -d --wait db           # db only (127.0.0.1:55432)
+docker compose up --build --wait         # db, api (:8000) and ui (:8501)
 uv run pytest -q -m "not integration"    # unit tests, no db, no key
 uv run pytest -q -m integration          # needs the db
 uv run pre-commit run --all-files        # whitespace, secrets, Ruff
@@ -81,4 +82,4 @@ make index                               # re-embed knowledge/tables.md and exam
 make recall                              # recall@3 on the development questions
 ```
 
-Commands for the full `docker compose up` and `make eval` are added in the phase that creates them.
+The command for `make eval` is added in the phase that creates it.
