@@ -205,7 +205,9 @@ def _roundtrip(root: exp.Expression) -> str:
     except Exception:  # fail closed, as in parsing
         same, sql = False, ""
     if not same:
-        raise _Blocked("roundtrip_mismatch", "the SQL does not survive a parse round trip")
+        message = "the SQL does not survive a parse round trip"
+        hint = "a ROUND of an AVG or a division needs a cast, as in ROUND(AVG(x)::numeric, 1)"
+        raise _Blocked("roundtrip_mismatch", f"{message} ({hint})")
     return sql
 
 

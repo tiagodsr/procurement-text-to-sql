@@ -5,31 +5,12 @@ from decimal import Decimal
 import pytest
 from openai.lib._parsing._responses import type_to_text_format_param
 
-from assistant.config import Pricing, PricingError, cost_usd
+from assistant.config import PricingError, cost_usd
 from assistant.llm import LLMUnavailable, embed, parse
 from assistant.schemas import LLM_OUTPUTS, IntakeResult
 from assistant.trace import Tracer, read_events, summarize
-from tests.fake_llm import FakeClock, FakeOpenAI, Reply, connection_error
+from tests.fake_llm import PRICING, FakeClock, FakeOpenAI, Reply, connection_error
 
-# Round, obviously fictitious prices (USD per 1M tokens): tests never depend on real ones.
-PRICING = Pricing.model_validate(
-    {
-        "as_of": "2000-01-01",
-        "source": "https://example.test/pricing",
-        "currency": "USD",
-        "unit": "per 1M tokens",
-        "models": {
-            "test-chat": {
-                "kind": "chat",
-                "input": "1.00",
-                "cached_input": "0.50",
-                "output": "4.00",
-            },
-            "test-nocache": {"kind": "chat", "input": "2.00", "output": "8.00"},
-            "test-embed": {"kind": "embedding", "input": "0.10"},
-        },
-    }
-)
 VALID = IntakeResult(route="sql", reason="clear", clarification=None)
 USAGE = {"input_tokens": 1200, "cached_tokens": 200, "output_tokens": 300}
 

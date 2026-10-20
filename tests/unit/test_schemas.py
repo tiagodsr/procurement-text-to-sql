@@ -23,6 +23,7 @@ SQL = "SELECT COUNT(*) FROM suppliers LIMIT 100"
 SHAPE = {"sql": SQL, "columns": ["count"], "truncated": False, "db_ms": 2.0}
 ONE_ROW = SqlResult(rows=[[96]], row_count=1, **SHAPE)
 NO_ROWS = SqlResult(rows=[], row_count=0, **SHAPE)
+NULL_ROW = SqlResult(rows=[[None]], row_count=1, **SHAPE)  # SUM over no rows
 CLARIFY = Clarification(question="Which one?", reason="entity_ambiguity", options=["A", "B"])
 GAP = NoDataDiagnostic(summary="The year filter removed every row.")
 FAILED = ErrorInfo(kind="max_retries", message="SQL failed twice")
@@ -58,9 +59,10 @@ def test_every_status_has_a_valid_example(status):
         # answered needs the executed SQL and a non-empty preview or aggregate
         ("answered", {"sql": None, "result": None, "cited_rows": []}, "executed SQL"),
         ("answered", {"result": NO_ROWS, "cited_rows": []}, "at least one row"),
-        # no_data needs zero rows and a diagnostic
+        # no_data needs an empty result (no rows, or one row of nulls) and a diagnostic
         ("no_data", {"diagnostic": None}, "diagnostic"),
-        ("no_data", {"result": ONE_ROW}, "zero rows"),
+        ("no_data", {"result": ONE_ROW}, "empty result"),
+        ("answered", {"result": NULL_ROW, "sql": SQL, "cited_rows": [0]}, "with a value"),
         # needs_clarification needs a clarification and runs no SQL
         ("needs_clarification", {"clarification": None}, "needs a clarification"),
         ("needs_clarification", {"sql": SQL, "result": ONE_ROW}, "no SQL result"),
@@ -131,3 +133,13 @@ def test_llm_output_schemas_are_strict_compatible(model: type[BaseModel]):
         if node.get("type") == "object":
             assert node.get("additionalProperties") is False
             assert set(node["required"]) == set(node["properties"]), "every field is required"
+
+
+def test_refused_may_follow_a_failed_query_but_never_returned_rows():
+    failed = TraceEvent(request_id="r", step="execute", kind="tool", latency_ms=3, status="error")
+    assert answer("refused", usage=RequestUsage(steps=[failed])).status == "refused"
+
+
+def test_no_data_accepts_the_null_row_of_an_aggregate_over_no_rows():
+    assert NULL_ROW.empty and NO_ROWS.empty and not ONE_ROW.empty
+    assert answer("no_data", result=NULL_ROW).status == "no_data"

@@ -76,7 +76,9 @@ uv run pytest -q -m "not integration"    # unit tests, no db, no key
 uv run pytest -q -m integration          # needs the db
 uv run pre-commit run --all-files        # whitespace, secrets, Ruff
 make dump                                # rebuild the data dump (throwaway container)
+uv run --env-file .env ask "<question>"  # one question end to end (db + API key)
+make index                               # re-embed knowledge/tables.md and examples.md
+make recall                              # recall@3 on the development questions
 ```
 
-Commands for `ask`, the full `docker compose up`, `make index` and `make eval` are added in the
-phase that creates them.
+Commands for the full `docker compose up` and `make eval` are added in the phase that creates them.

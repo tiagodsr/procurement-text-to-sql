@@ -15,8 +15,8 @@ StepStatus = Literal[
     "ok", "refusal", "invalid_output", "incomplete", "upstream_error", "blocked", "error"
 ]
 Step = Literal[
-    "intake", "retrieve", "generate_sql", "repair_sql", "guard", "execute", "explain", "embed",
-    "request",
+    "intake", "retrieve", "generate_sql", "repair_sql", "guard", "execute", "diagnose", "explain",
+    "embed", "request",
 ]  # fmt: skip
 Variant = Literal["workflow", "baseline"]
 JsonScalar = str | int | float | bool | None
@@ -131,11 +131,10 @@ LLM_OUTPUTS: tuple[type[Contract], ...] = (
 
 
 class RetrievedDoc(Contract):
-    id: str
-    score: float
-    doc_type: Literal["table", "glossary", "example"]
-    table: str | None = None
-    source: str
+    id: str  # "table:<name>" or "example:<name>"
+    doc_type: Literal["table", "example"]
+    score: float  # cosine similarity to the question
+    source: str  # "knowledge/<file>.md#<section>"
 
 
 class GuardViolation(Contract):
@@ -165,6 +164,13 @@ class SqlResult(Contract):
         if self.row_count > len(self.rows) and not self.truncated:
             raise ValueError("a preview shorter than row_count must be marked truncated")
         return self
+
+    @property
+    def empty(self) -> bool:
+        """No rows, or one row of nulls: what an aggregate such as SUM returns over no rows."""
+        return self.row_count == 0 or (
+            self.row_count == 1 and all(value is None for value in self.rows[0])
+        )
 
 
 class SqlError(Contract):
@@ -253,6 +259,7 @@ class FinalAnswer(Contract):
     evidence: list[RetrievedDoc] = []
     cited_rows: list[int] = []
     assumptions: list[str] = []
+    caveats: list[str] = []
     error: ErrorInfo | None = None
     usage: RequestUsage = RequestUsage()
 
@@ -274,16 +281,16 @@ class FinalAnswer(Contract):
 
         if status in ("answered", "no_data") and (self.sql is None or self.result is None):
             raise ValueError(f"status {status!r} needs the executed SQL and its result")
-        if status == "answered" and not self.result.rows:
-            raise ValueError("an answered question needs at least one row (or aggregate)")
-        if status == "no_data" and (self.result.row_count != 0 or self.diagnostic is None):
-            raise ValueError("no_data needs zero rows and a diagnostic of the filters")
+        if status == "answered" and self.result.empty:
+            raise ValueError("an answered question needs at least one row with a value")
+        if status == "no_data" and (not self.result.empty or self.diagnostic is None):
+            raise ValueError("no_data needs an empty result and a diagnostic of the filters")
         if status == "needs_clarification" and self.clarification is None:
             raise ValueError("needs_clarification needs a clarification")
         if status in ("needs_clarification", "out_of_scope", "refused", "error") and ran:
             raise ValueError(f"status {status!r} means no SQL result is returned")
         if status in ("out_of_scope", "refused") and any(
-            e.step == "execute" for e in self.usage.steps
+            e.step == "execute" and e.status == "ok" for e in self.usage.steps
         ):
-            raise ValueError(f"status {status!r} means no SQL was executed, but the trace has one")
+            raise ValueError(f"status {status!r} means no SQL returned rows, but the trace has one")
         return self

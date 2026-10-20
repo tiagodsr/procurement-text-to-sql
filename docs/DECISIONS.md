@@ -47,6 +47,32 @@ the guard and the executor again, and reports which filter removed every row. Th
 by code, not by an LLM, so `no_data` always says why. At most 8 filters are checked; filters inside
 subqueries are not split.
 
+## Workflow
+
+- **Fixed steps, no agent.** `workflow.py` runs intake, SQL, guard, execute, repair and explain in a
+  fixed order, and every exit (clarification, no data, out of scope, refused, error) is code.
+- **Intake decides before any SQL.** It routes to `sql`, `clarify`, `out_of_scope` or `unsafe`.
+  It asks only about sister brands and vague judgements; any other missing detail gets a default
+  that the SQL step states as an assumption.
+- **Sister brands are a list, not a tool.** Glossary rule 6 lists the six brands with two legal
+  entities, so intake sees them in its instructions and no entity-resolution step is needed. An
+  integration test checks the list against `supplier_aliases`.
+- **One SQL prompt for generation and repair.** A repair is the same instructions with the failed SQL
+  and the error added to the input, so the two cannot drift apart. At most two repairs.
+- **A guard block that means "write" is refused at once.** `write_or_ddl`, `not_select`,
+  `select_into` and `locking_clause` end as `refused` with nothing executed; other blocks (a clock
+  function, an unknown table) go to repair like a database error.
+- **Empty means no rows or one row of nulls.** `SUM` over no rows returns one null row, so a total
+  for 2030 is `no_data` with its diagnostic, not an answer of "null". `no_data` has no explain call:
+  the diagnostic summary is the answer.
+- **Refusals.** A model refusal before any rows were read ends as `refused`; after that (in explain)
+  it is an `error`. `refused` and `out_of_scope` never return rows; a failed query before a refusal
+  is allowed in the trace.
+- **Citations are checked.** An explanation that cites a row the result does not have is an
+  `invalid_output` error, never shown.
+- **Supplier matching never joins aliases into lines.** Some suppliers have two aliases, so a join
+  counts their lines twice; the prompt and `tables.md` ask for `supplier_id IN (...)`.
+
 ## LLM calls
 
 - **One door.** Every call goes through `llm.py`, which records model, tokens, latency and cost as a
@@ -65,8 +91,21 @@ subqueries are not split.
 
 ## Retrieval
 
-About 25 documents (table sections and example queries), so the vectors are committed in a JSON file
-and ranked with plain-Python cosine similarity, as in the course. No vector database.
+- **24 documents, committed vectors.** The 12 table sections and 12 example queries are few, so their
+  vectors are committed in `knowledge/index.json` and ranked with plain-Python cosine similarity, as
+  in the course. No vector database. Loading checks one vector per document and the embedding
+  model; it does not detect edited text, so `make index` follows any edit of those files.
+- **Two rankings.** Tables and examples are ranked separately (5 and 3), so a cluster of similar
+  examples cannot push a needed table out. The glossary is always in the instructions, never
+  searched.
+- **k is above the measured k.** The plan measures recall@3 (0.85 on the development questions);
+  the SQL step gets 5 tables (recall@5 0.96), because a missing table costs a wrong query while a
+  spare one costs about 150 tokens. Recall is not tuned further.
+- **Docs speak the questions' language.** Each table section starts with an "Answers:" line in
+  business words ("site", "how much we spent"), and `categories` lists the twelve leaf names.
+  Column lists alone matched questions poorly (recall@3 was 0.75).
+- **Examples are tested.** Every example query passes the guard and returns rows (an integration
+  test), and no example question is an evaluation question (a unit test).
 
 ## Tracing
 
@@ -81,4 +120,8 @@ clock of the whole request.
 - `information_schema.table_constraints` hides constraints from a SELECT-only role; schema
   introspection as `app_ro` must use `pg_catalog`.
 - In sqlglot 30, `AND` and `OR` are function nodes; the guard skips them when checking functions.
+- sqlglot's PostgreSQL generator adds `CAST(... AS DECIMAL)` inside `ROUND(AVG(x), 1)` (and around
+  `STDDEV`, percentiles and some divisions), so the regenerated tree differs and the guard blocks it
+  as `roundtrip_mismatch`. The guard keeps that rule (it also stops a quoted function name changing
+  case); the SQL prompt and the guard's message ask for `ROUND(AVG(x)::numeric, 1)` instead.
   sqlglot is pinned below the next major version because the guard depends on its tree shape.

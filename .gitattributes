@@ -2,3 +2,4 @@
 *.gz binary
 *.db binary
 *.png binary
+knowledge/index.json -diff linguist-generated
