@@ -1,7 +1,7 @@
 """Executor: runs SQL the guard accepted, as app_ro, in a READ ONLY transaction with a timeout and
 an EXPLAIN cost check, and always rolls back. Database text in errors and rows is untrusted data.
 
-Demo (needs `make db-dev`):
+Demo (needs the db: `docker compose up -d --wait db`):
     uv run python -m assistant.executor "SELECT name, status FROM suppliers ORDER BY name"
 """
 
@@ -156,7 +156,7 @@ def main() -> None:
     try:
         result = execute(guarded, config)
     except DatabaseUnavailable as exc:
-        sys.exit(f"{exc}; is the database up? (make db-dev)")
+        sys.exit(f"{exc}; is the database up? (docker compose up -d --wait db)")
     print(result.model_dump_json(indent=2))
     sys.exit(0 if isinstance(result, SqlResult) else 1)
 

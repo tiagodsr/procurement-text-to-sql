@@ -19,9 +19,11 @@ services:
       timeout: 5s
       retries: 20
       start_period: 30s
+    # Loopback only, for `uv run ask` and the integration tests on this machine. The application
+    # connects as the read-only role app_ro.
+    ports:
+      - "127.0.0.1:55432:5432"
     restart: unless-stopped
-    # No ports: the database is reachable only on the compose network.
-    # compose.dev.yml adds a loopback port for host-side tests.
 
 volumes:
   db-data:

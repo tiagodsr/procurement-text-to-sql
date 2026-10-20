@@ -1,7 +1,7 @@
 """Zero-row diagnostic: drop one top-level WHERE/HAVING condition at a time, re-check each variant
 with the guard, count its rows through the executor, and say which filter removed every row.
 
-Demo (needs `make db-dev`):
+Demo (needs the db: `docker compose up -d --wait db`):
     uv run python -m assistant.diagnose \
       "SELECT cart_id FROM shopping_carts WHERE status = 'completed' AND created_at >= '2030-01-01'"
 """
