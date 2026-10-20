@@ -21,7 +21,7 @@ Failure = Literal["refusal", "incomplete", "invalid_output"]
 
 
 class LLMUnavailable(RuntimeError):
-    """The API could not be reached or answered with an error (the API layer returns 502)."""
+    """The API could not be reached or answered with an error (the workflow ends as `error`)."""
 
 
 @dataclass(frozen=True)

@@ -23,6 +23,25 @@ search found, with their scores), the SQL that ran, the rows (cited rows marked)
 per step with model, tokens, cost and latency. `--json` prints the full answer. A question costs
 about 0.002 USD with `gpt-4.1-mini` and takes 1 to 5 seconds.
 
+## API
+
+```bash
+uv run --env-file .env uvicorn assistant.api:app      # http://127.0.0.1:8000, interactive docs at /docs
+curl -s localhost:8000/health
+curl -s -X POST localhost:8000/v1/query -H 'content-type: application/json' \
+  -d '{"question": "Which five suppliers had the highest spend in 2025?"}'
+```
+
+`POST /v1/query` takes `question` and, to reply to a clarification, `clarification` (the option
+chosen). The response is the same answer as the terminal one, as JSON: `status`, `answer`, `sql`,
+`result` (columns and rows), `cited_rows`, `evidence` (documents with scores), `assumptions`,
+`caveats`, and `usage` with the `cost_usd`, the `latency_ms` and every step of the trace. Every
+workflow outcome is a `200` with its status (a failed service is status `error`, with the cost
+spent so far). A missing `OPENAI_API_KEY` is `503` and an invalid request is `422`.
+
+`GET /health` always answers while the API is up and says what a question needs:
+`{"status": "ok", "llm_configured": true, "database": true}`.
+
 ## How a question is answered
 
 ```text
@@ -113,7 +132,7 @@ uv run python -m assistant.diagnose "SELECT cart_id FROM shopping_carts WHERE st
 ```bash
 uv sync                                  # create the environment
 uv run pre-commit install                # install the git hooks (once per clone)
-uv run pytest -q -m "not integration"    # unit and security tests, no database, no API key
+uv run pytest -q -m "not integration"    # unit, API and security tests: no database, no API key
 uv run pytest -q -m integration          # executor, diagnostic and role tests (needs the db)
 uv run pre-commit run --all-files        # whitespace, secrets, Ruff
 make dump                                # regenerate the data dump in a throwaway container
@@ -127,6 +146,7 @@ when a command needs the API key.
 ```text
 src/assistant/
   cli.py           `ask`: one question in the terminal, with SQL, rows and trace
+  api.py           FastAPI: `GET /health` and `POST /v1/query`
   workflow.py      the fixed workflow and its exits for every status
   retrieve.py      semantic search: documents, committed vectors, cosine, recall
   prompts.py       builds each step's instructions from prompts/ and knowledge/

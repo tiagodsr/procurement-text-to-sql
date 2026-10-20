@@ -73,6 +73,18 @@ subqueries are not split.
 - **Supplier matching never joins aliases into lines.** Some suppliers have two aliases, so a join
   counts their lines twice; the prompt and `tables.md` ask for `supplier_id IN (...)`.
 
+## Demo surface
+
+- **The API returns the workflow's answer as it is.** `POST /v1/query` responds with the
+  `FinalAnswer` contract, so the status rules, the evidence, the trace, the cost and the latency
+  are the ones the tests already check, and the terminal and the API cannot drift apart.
+- **Every outcome is a 200 with a status.** `error` is an answer too: it keeps the trace and the
+  cost spent before the failure. Only a request that cannot run is an HTTP error: a missing key is
+  503, an invalid request is 422.
+- **The API starts without a key.** The workflow's dependencies are built on the first question, so
+  `GET /health` answers either way and says `llm_configured` and `database`. The page reads it to
+  warn before anyone asks.
+
 ## LLM calls
 
 - **One door.** Every call goes through `llm.py`, which records model, tokens, latency and cost as a
