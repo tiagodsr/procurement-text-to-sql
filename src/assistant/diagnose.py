@@ -73,7 +73,8 @@ def diagnose(
         guarded = check(variant, guard_config)
         result = run(guarded) if isinstance(guarded, GuardedSQL) else None
         if isinstance(result, SqlResult):
-            checks.append(FilterCheck(filter=condition, rows_without=result.row_count))
+            rows = 0 if result.empty else result.row_count
+            checks.append(FilterCheck(filter=condition, rows_without=rows))
         else:
             unchecked += 1
     return NoDataDiagnostic(summary=summarize(checks, unchecked), checks=checks)
