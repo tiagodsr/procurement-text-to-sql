@@ -1,5 +1,6 @@
-"""The fixed workflow: intake -> SQL -> guard -> read-only execute (repair up to twice) -> explain,
-with exits for clarification, no data, out of scope, refusal and errors. Every step is traced."""
+"""The fixed workflow: intake -> semantic search -> SQL -> guard -> read-only execute (repair up to
+twice) -> explain, with exits for clarification, no data, out of scope, refusal and errors. Every
+step is traced."""
 
 from __future__ import annotations
 
@@ -16,7 +17,8 @@ from assistant.config import Pricing, Settings
 from assistant.diagnose import diagnose
 from assistant.executor import DatabaseUnavailable, execute
 from assistant.guard import GuardedSQL, check
-from assistant.llm import Clock, LLMUnavailable, parse
+from assistant.llm import Clock, LLMUnavailable, embed, parse
+from assistant.retrieve import TOP_EXAMPLES, TOP_TABLES, Index
 from assistant.schemas import (
     AnswerStatus,
     ErrorInfo,
@@ -26,6 +28,7 @@ from assistant.schemas import (
     GuardViolation,
     IntakeResult,
     QueryRequest,
+    RetrievedDoc,
     SqlError,
     SqlResult,
     Step,
@@ -55,6 +58,7 @@ class Deps:
     client: Any
     settings: Settings
     pricing: Pricing
+    index: Index
     run_sql: Runner = execute
     clock: Clock = time.perf_counter
 
@@ -75,8 +79,9 @@ def answer(request: QueryRequest, deps: Deps, tracer: Tracer | None = None) -> F
     """Run the workflow for one request; always returns a FinalAnswer."""
     tracer = tracer or Tracer(deps.settings.trace_dir, variant="workflow")
     started = deps.clock()
+    evidence: list[RetrievedDoc] = []  # filled by the search step, kept whatever the exit
     try:
-        fields = _run(request, deps, tracer)
+        fields = _run(request, deps, tracer, evidence)
     except _Exit as exit_:
         fields = exit_.fields
     except (LLMUnavailable, DatabaseUnavailable) as exc:
@@ -88,12 +93,15 @@ def answer(request: QueryRequest, deps: Deps, tracer: Tracer | None = None) -> F
         request_id=tracer.request_id,
         question=request.question,
         variant="workflow",
+        evidence=evidence,
         usage=tracer.usage(),
         **fields,
     )
 
 
-def _run(request: QueryRequest, deps: Deps, tracer: Tracer) -> dict[str, Any]:
+def _run(
+    request: QueryRequest, deps: Deps, tracer: Tracer, evidence: list[RetrievedDoc]
+) -> dict[str, Any]:
     asked = _user_input(request)
     route = _llm(deps, tracer, "intake", prompts.intake(), asked, IntakeResult)
     if route.route == "clarify":
@@ -104,7 +112,11 @@ def _run(request: QueryRequest, deps: Deps, tracer: Tracer) -> dict[str, Any]:
     if route.route == "unsafe":
         raise _Exit("refused", REFUSED)
 
-    instructions = prompts.sql()
+    evidence += _search(request, deps, tracer)
+    instructions = prompts.sql(
+        tables=_texts(deps.index, evidence, "table"),
+        examples=_texts(deps.index, evidence, "example"),
+    )
     query = _llm(deps, tracer, "generate_sql", instructions, asked, GeneratedSQL)
     for repairs in range(MAX_REPAIRS + 1):
         outcome = _guard_and_run(query.sql, deps, tracer)
@@ -169,6 +181,26 @@ def _llm[T: BaseModel](
     if result.failure == "refusal" and step != "explain":
         raise _Exit("refused", REFUSED)
     raise _error("invalid_output", f"the {step} step returned unusable output: {result.detail}")
+
+
+def _search(request: QueryRequest, deps: Deps, tracer: Tracer) -> list[RetrievedDoc]:
+    """The closest table docs and example queries to the question (and its clarification)."""
+    text = " ".join(filter(None, [request.question, request.clarification]))
+    [vector] = embed(
+        deps.client,
+        [text],
+        model=deps.settings.embedding_model,
+        pricing=deps.pricing,
+        tracer=tracer,
+        step="retrieve",
+        clock=deps.clock,
+    )
+    tables = deps.index.search(vector, "table", TOP_TABLES)
+    return tables + deps.index.search(vector, "example", TOP_EXAMPLES)
+
+
+def _texts(index: Index, found: list[RetrievedDoc], doc_type: str) -> str:
+    return "\n\n".join(index.text(doc.id) for doc in found if doc.doc_type == doc_type)
 
 
 def _guard_and_run(sql: str, deps: Deps, tracer: Tracer) -> SqlResult | SqlError | GuardViolation:

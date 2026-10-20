@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from assistant.config import Settings
 from assistant.executor import DatabaseUnavailable
 from assistant.guard import GuardedSQL
+from assistant.retrieve import TOP_EXAMPLES, TOP_TABLES, Index, load_docs
 from assistant.schemas import (
     Clarification,
     ExplanationDraft,
@@ -22,6 +23,10 @@ from assistant.workflow import MAX_REPAIRS, Deps, answer
 from tests.fake_llm import PRICING, FakeOpenAI, Reply, connection_error
 
 SETTINGS = Settings(llm_model="test-chat", embedding_model="test-embed")
+# The fake client embeds a question as [len(text), 0], so document j at [1, j] scores
+# 1 / sqrt(1 + j^2): the first documents of each type in the knowledge files rank first.
+DOCS = load_docs()
+INDEX = Index("test-embed", DOCS, [[1.0, float(j)] for j in range(len(DOCS))])
 QUESTION = "Which supplier had the highest spend?"
 TOP_SQL = "SELECT name, spend_eur FROM v_supplier_summary ORDER BY spend_eur DESC LIMIT 2"
 
@@ -65,7 +70,14 @@ class FakeDB:
 def run(replies: list[Reply], db: FakeDB | None = None, *, question=QUESTION, clarification=None):
     client = FakeOpenAI(replies)
     db = db or FakeDB()
-    deps = Deps(client=client, settings=SETTINGS, pricing=PRICING, run_sql=db, clock=client.clock)
+    deps = Deps(
+        client=client,
+        settings=SETTINGS,
+        pricing=PRICING,
+        index=INDEX,
+        run_sql=db,
+        clock=client.clock,
+    )
     request = QueryRequest(question=question, clarification=clarification)
     final = answer(request, deps, Tracer(None, variant="workflow"))
     return final, client, db
@@ -76,7 +88,8 @@ def steps(final) -> list[str]:
 
 
 def sent(client: FakeOpenAI, key: str) -> list[str]:
-    return [kwargs[key] for _, kwargs in client.calls]
+    """`key` of every LLM call, in order (embedding calls left out)."""
+    return [kwargs[key] for kind, kwargs in client.calls if kind == "responses"]
 
 
 # --- answered ---------------------------------------------------------------------------------
@@ -91,11 +104,29 @@ def test_a_clear_question_is_answered_with_sql_rows_and_citations():
     assert final.cited_rows == [0]
     assert final.assumptions == ["All purchase history."]
     assert steps(final) == [
-        "intake:ok", "generate_sql:ok", "guard:ok", "execute:ok", "explain:ok", "request:answered",
+        "intake:ok", "retrieve:ok", "generate_sql:ok", "guard:ok", "execute:ok", "explain:ok",
+        "request:answered",
     ]  # fmt: skip
-    # three calls of 1000 in / 100 out at 1.00 / 4.00 per 1M, half a second each
-    assert final.usage.cost_usd == pytest.approx(3 * 0.0014)
+    # three calls of 1000 in / 100 out at 1.00 / 4.00 per 1M, half a second each, and the
+    # question embedded as 6 tokens at 0.10 per 1M
+    assert final.usage.cost_usd == pytest.approx(3 * 0.0014 + 6 * 0.10 / 1_000_000)
     assert final.usage.latency_ms == 1500.0
+
+
+def test_the_answer_carries_the_retrieved_docs_that_the_sql_step_saw():
+    db = FakeDB(rows(["Alpha GmbH", 10.0]))
+    final, client, _ = run([reply(SQL_ROUTE), reply(QUERY), reply(EXPLAINED)], db)
+    tables = [d for d in DOCS if d.doc_type == "table"]
+    examples = [d for d in DOCS if d.doc_type == "example"]
+    assert [d.id for d in final.evidence] == [
+        d.id for d in tables[:TOP_TABLES] + examples[:TOP_EXAMPLES]
+    ]
+    assert final.evidence[0].score > final.evidence[1].score
+    sql_instructions = sent(client, "instructions")[1]
+    assert all(d.text in sql_instructions for d in tables[:TOP_TABLES])
+    assert tables[TOP_TABLES].text not in sql_instructions  # not retrieved, not sent
+    [embedded] = [kwargs["input"] for kind, kwargs in client.calls if kind == "embeddings"]
+    assert embedded == [QUESTION]
 
 
 def test_the_explain_step_sees_numbered_rows():
@@ -121,7 +152,7 @@ def test_a_sister_brand_needs_clarification_and_runs_no_sql():
     assert final.status == "needs_clarification"
     assert final.answer == BRAND.question
     assert final.clarification == BRAND
-    assert len(client.calls) == 1
+    assert len(sent(client, "input")) == 1
     assert db.ran == []
 
 
@@ -138,14 +169,14 @@ def test_an_out_of_scope_question_runs_no_sql():
     route = IntakeResult(route="out_of_scope", reason="weather", clarification=None)
     final, client, db = run([reply(route)], question="Will it rain in Porto tomorrow?")
     assert final.status == "out_of_scope"
-    assert (len(client.calls), db.ran) == (1, [])
+    assert (len(sent(client, "input")), db.ran) == (1, [])
 
 
 def test_an_unsafe_request_is_refused_by_intake():
     route = IntakeResult(route="unsafe", reason="asks to delete data", clarification=None)
     final, client, db = run([reply(route)], question="Delete all blocked suppliers.")
     assert final.status == "refused"
-    assert (len(client.calls), db.ran) == (1, [])
+    assert (len(sent(client, "input")), db.ran) == (1, [])
 
 
 def test_a_model_refusal_is_refused():
@@ -197,7 +228,7 @@ def test_zero_rows_end_as_no_data_with_the_filter_that_removed_them():
     assert final.status == "no_data"
     assert "created_at >= CAST('2030-01-01' AS DATE)" in final.answer
     assert final.diagnostic.checks[1].rows_without == 2
-    assert len(client.calls) == 2  # no explain call: the summary is written by code
+    assert len(sent(client, "input")) == 2  # no explain call: the summary is written by code
     assert "diagnose:ok" in steps(final)
 
 
@@ -245,7 +276,7 @@ def test_repairs_stop_after_the_maximum():
     final, client, _ = run(replies, db)
     assert final.status == "error"
     assert final.error.kind == "max_retries"
-    assert len(client.calls) == 1 + 1 + MAX_REPAIRS  # no explain call
+    assert len(sent(client, "input")) == 1 + 1 + MAX_REPAIRS  # no explain call
     assert final.sql is None and final.result is None
 
 

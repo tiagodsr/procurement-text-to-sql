@@ -131,11 +131,10 @@ LLM_OUTPUTS: tuple[type[Contract], ...] = (
 
 
 class RetrievedDoc(Contract):
-    id: str
-    score: float
-    doc_type: Literal["table", "glossary", "example"]
-    table: str | None = None
-    source: str
+    id: str  # "table:<name>" or "example:<name>"
+    doc_type: Literal["table", "example"]
+    score: float  # cosine similarity to the question
+    source: str  # "knowledge/<file>.md#<section>"
 
 
 class GuardViolation(Contract):

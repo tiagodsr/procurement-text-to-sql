@@ -19,15 +19,21 @@ def sister_brands() -> dict[str, set[str]]:
     return brands
 
 
-@pytest.mark.parametrize("build", [prompts.intake, prompts.sql, prompts.explain])
+def sql_prompt() -> str:
+    return prompts.sql(tables="## suppliers\n96 rows.", examples="## an_example\nSELECT 1")
+
+
+@pytest.mark.parametrize("build", [prompts.intake, sql_prompt, prompts.explain])
 def test_every_prompt_is_filled_and_carries_the_glossary(build):
     text = build()
     assert "{{" not in text
     assert prompts.knowledge("glossary.md") in text
 
 
-def test_the_sql_prompt_carries_every_table():
-    assert prompts.knowledge("tables.md") in prompts.sql()
+def test_the_sql_prompt_carries_the_docs_it_is_given():
+    text = sql_prompt()
+    assert "## suppliers\n96 rows." in text
+    assert "## an_example\nSELECT 1" in text
 
 
 def test_an_unfilled_placeholder_is_an_error():

@@ -18,3 +18,12 @@ dump:  ## regenerate data/init/01_dump.sql.gz
 	docker exec $(BUILD_CONTAINER) sh -c 'pg_dump -U postgres -d $(BUILD_DB) --no-owner \
 		--no-privileges --restrict-key=procurementv1 | gzip -n -9' > data/init/01_dump.sql.gz
 	docker rm -f $(BUILD_CONTAINER)
+
+.PHONY: index recall
+
+# Semantic search (assistant.retrieve). Both need OPENAI_API_KEY in .env; each costs < 0.001 USD.
+index:  ## re-embed tables.md and examples.md into knowledge/index.json
+	uv run --env-file .env python -m assistant.retrieve build
+
+recall:  ## recall@3 of the table docs on the development questions
+	uv run --env-file .env python -m assistant.retrieve recall

@@ -30,8 +30,9 @@ def intake() -> str:
     return render("intake", glossary=knowledge("glossary.md"))
 
 
-def sql() -> str:
-    return render("sql", glossary=knowledge("glossary.md"), tables=knowledge("tables.md"))
+def sql(tables: str, examples: str) -> str:
+    """`tables` and `examples` are retrieved sections of the knowledge files."""
+    return render("sql", glossary=knowledge("glossary.md"), tables=tables, examples=examples)
 
 
 def explain() -> str:

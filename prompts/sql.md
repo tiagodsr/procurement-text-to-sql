@@ -20,6 +20,9 @@ Rules for the query:
   `CONCAT`, `SUBSTRING`, `SPLIT_PART`, `REPLACE`. Casts with `::` are fine.
 - Spend and volume come from `v_completed_lines` in EUR (`total_value_eur`) unless the question
   asks for the original currency. Round EUR amounts to 2 decimals.
+- When `ROUND` takes an `AVG`, `STDDEV`, a percentile or a division, cast it to numeric, as in
+  `ROUND(AVG(actual_days)::numeric, 1)` or `ROUND((100.0 * a / b)::numeric, 1)`: the SQL guard
+  blocks it otherwise.
 - Match supplier names case-insensitively with `ILIKE` on `suppliers.name`, and brands through
   `supplier_id IN (SELECT supplier_id FROM supplier_aliases WHERE ...)`, never with a join that can
   repeat a supplier's lines. Follow the clarification when it picks a legal entity.
@@ -36,6 +39,14 @@ how a name was matched), one short sentence each, in English. An empty list if t
 
 {{glossary}}
 
-## Tables and views
+## The closest tables and views
+
+Found by semantic search for this question. Other tables exist but are rarely needed.
 
 {{tables}}
+
+## The closest example queries
+
+Correct queries for similar questions. Reuse their patterns, not their filters.
+
+{{examples}}

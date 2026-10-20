@@ -91,8 +91,21 @@ subqueries are not split.
 
 ## Retrieval
 
-About 25 documents (table sections and example queries), so the vectors are committed in a JSON file
-and ranked with plain-Python cosine similarity, as in the course. No vector database.
+- **24 documents, committed vectors.** The 12 table sections and 12 example queries are few, so their
+  vectors are committed in `knowledge/index.json` and ranked with plain-Python cosine similarity, as
+  in the course. No vector database. Loading checks one vector per document and the embedding
+  model; it does not detect edited text, so `make index` follows any edit of those files.
+- **Two rankings.** Tables and examples are ranked separately (5 and 3), so a cluster of similar
+  examples cannot push a needed table out. The glossary is always in the instructions, never
+  searched.
+- **k is above the measured k.** The plan measures recall@3 (0.85 on the development questions);
+  the SQL step gets 5 tables (recall@5 0.96), because a missing table costs a wrong query while a
+  spare one costs about 150 tokens. Recall is not tuned further.
+- **Docs speak the questions' language.** Each table section starts with an "Answers:" line in
+  business words ("site", "how much we spent"), and `categories` lists the twelve leaf names.
+  Column lists alone matched questions poorly (recall@3 was 0.75).
+- **Examples are tested.** Every example query passes the guard and returns rows (an integration
+  test), and no example question is an evaluation question (a unit test).
 
 ## Tracing
 
@@ -107,4 +120,8 @@ clock of the whole request.
 - `information_schema.table_constraints` hides constraints from a SELECT-only role; schema
   introspection as `app_ro` must use `pg_catalog`.
 - In sqlglot 30, `AND` and `OR` are function nodes; the guard skips them when checking functions.
+- sqlglot's PostgreSQL generator adds `CAST(... AS DECIMAL)` inside `ROUND(AVG(x), 1)` (and around
+  `STDDEV`, percentiles and some divisions), so the regenerated tree differs and the guard blocks it
+  as `roundtrip_mismatch`. The guard keeps that rule (it also stops a quoted function name changing
+  case); the SQL prompt and the guard's message ask for `ROUND(AVG(x)::numeric, 1)` instead.
   sqlglot is pinned below the next major version because the guard depends on its tree shape.

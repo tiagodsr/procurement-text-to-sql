@@ -12,6 +12,7 @@ from pydantic import ValidationError
 
 from assistant.config import load_pricing, load_settings
 from assistant.llm import make_client
+from assistant.retrieve import load_index
 from assistant.schemas import FinalAnswer, QueryRequest
 from assistant.workflow import Deps, answer
 
@@ -73,6 +74,7 @@ def main(argv: list[str] | None = None) -> None:
         client=make_client(settings),
         settings=settings,
         pricing=load_pricing(settings.pricing_path),
+        index=load_index(settings.embedding_model),
     )
     final = answer(request, deps)
     print(final.model_dump_json(indent=2) if args.json else render(final))
