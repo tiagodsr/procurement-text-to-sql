@@ -1,14 +1,12 @@
 # Procurement Text-to-SQL Assistant
 
-Ask business questions about suppliers and purchasing in plain English. An agent writes safe,
-read-only SQL against PostgreSQL, asks for clarification when the question is ambiguous, and
-explains the result with evidence, cost and latency.
+Ask business questions about suppliers and purchasing in plain English. A fixed workflow of LLM
+steps writes safe, read-only SQL against PostgreSQL, asks for clarification when the question is
+ambiguous, and explains the result with evidence, cost and latency.
 
-Final project of the EDIT Generative AI course (idea 04, "Text-to-SQL Assistant").
-All data is fully synthetic.
-
-**Status:** in development. The plan, step by step, is in [docs/PLAN.md](docs/PLAN.md); design
-notes and progress are in [docs/LOG.md](docs/LOG.md).
+Final project of the EDIT Generative AI course (idea 04, "Text-to-SQL Assistant"). All data is
+fully synthetic. The plan is in [docs/PLAN.md](docs/PLAN.md) and the design decisions are in
+[docs/DECISIONS.md](docs/DECISIONS.md).
 
 ## Requirements
 
@@ -18,65 +16,36 @@ notes and progress are in [docs/LOG.md](docs/LOG.md).
 ## Database
 
 ```bash
-docker compose up -d --wait db           # PostgreSQL 16 with the synthetic data (about 10 s)
-docker compose exec db psql -U app_ro -d procurement   # explore as the read-only role
-docker compose down -v                   # stop and delete the data volume (next start reloads it)
+docker compose up -d --wait db                          # PostgreSQL 16 with the synthetic data
+docker compose exec db psql -U app_ro -d procurement    # explore as the read-only role
+docker compose down -v                                  # stop and delete the data volume
 ```
 
-The first start loads the committed dump (`data/init/01_dump.sql.gz`) and creates the read-only role
-`app_ro` (`data/init/02_roles.sql`, local password `app_ro_local`). The base Compose file publishes no
-database port. See [docs/data_model.md](docs/data_model.md) for the tables and their pitfalls.
-
-## Contracts, LLM calls and cost
-
-Every LLM and embedding call goes through `assistant.llm`, which writes one trace event (model,
-tokens, cost, latency, status) per call to `var/traces/YYYY-MM-DD.jsonl` (git-ignored). Prices come
-from `config/pricing.toml`; a model without a price is never called. These demos need no API key and
-spend nothing (they use an offline fake client):
-
-```bash
-uv run python -m assistant.config                 # settings (key masked) and priced models
-uv run python -m assistant.schemas --examples     # one valid answer per status
-uv run python -m assistant.schemas FinalAnswer    # JSON schema of a contract
-uv run python -m assistant.llm --demo             # three fake calls: cost, latency, p50/p95
-uv run python -m assistant.trace var/traces/*.jsonl   # p50/p95 latency and cost from a trace
-uv run python -m assistant.pricing gpt-4.1-mini 1200 200 300   # cost of input/cached/output tokens
-```
-
-Settings are read from environment variables (see `.env.example`); for local runs that need the key,
-use `uv run --env-file .env ...`.
+The first start loads the committed dump (`data/init/01_dump.sql.gz`) and creates the read-only
+role `app_ro` (`data/init/02_roles.sql`, local password `app_ro_local`). The database is published
+on `127.0.0.1:55432` only. The tables are described in [knowledge/tables.md](knowledge/tables.md)
+and the business rules in [knowledge/glossary.md](knowledge/glossary.md).
 
 ## SQL safety
 
-Generated SQL passes the guard (`assistant.guard`) before it runs. It parses the SQL with sqlglot and
-decides on the tree: exactly one SELECT, no writes or DDL anywhere (CTEs included), no `SELECT INTO`,
-no locking clauses, only the schema's tables and an allowlist of functions, a depth limit, and an
-outer `LIMIT` forced to the maximum. A blocked query names the rule that fired:
+Generated SQL goes through three independent layers before any row comes back:
 
-```bash
-uv run python -m assistant.guard "SELECT name FROM suppliers WHERE status = 'active'"
-uv run python -m assistant.guard "SELECT pg_sleep(10)"      # blocked: function_not_allowed
-```
-
-The guard is one of three independent layers:
-
-1. **Guard** (`assistant.guard`): decides on the parsed tree, before anything reaches the database.
-2. **Executor** (`assistant.executor`): runs the guarded SQL as `app_ro` inside a `READ ONLY`
-   transaction with `SET LOCAL statement_timeout` (3 s). It runs `EXPLAIN` first and refuses
-   plans that would cost more than 1,000,000 units (an exploding cross join costs about 7.6e10;
-   normal questions cost under 2,000). It returns a row preview, or a typed error
-   (`syntax`, `undefined_object`, `timeout`, `cost_limit`, `permission`, `other`) for the repair
-   step, and it always rolls back.
+1. **Guard** (`assistant.guard`): parses the SQL with sqlglot and decides on the tree. It allows
+   exactly one SELECT with no writes or DDL anywhere (CTEs included), no `SELECT INTO` and no
+   locking clauses. Only the schema's tables and an allowlist of functions are allowed, nesting
+   depth is limited, and an outer `LIMIT` is forced. A blocked query names the rule that fired.
+2. **Executor** (`assistant.executor`): runs the guarded SQL as `app_ro` in a `READ ONLY`
+   transaction with a 3 s timeout. It runs `EXPLAIN` first and refuses plans that would cost more
+   than 1,000,000 units, and it always rolls back. Errors come back typed, for the repair step.
 3. **Database role** (`app_ro`): can only read. Every guard attack is also sent straight to the
-   role, with no guard, in `tests/integration/test_role_attacks.py`. The role refuses every write,
-   DDL, `COPY`, `SET ROLE` and privileged catalog, even after a session switches the read-only
-   default off.
+   role in `tests/integration/test_role_attacks.py`, and the role refuses every one that needs a
+   privilege.
 
-When a query returns no rows, `assistant.diagnose` drops one top-level `WHERE`/`HAVING` condition
-at a time. It sends each variant back through the guard and the executor, and reports which filter
-removed the rows. These demos need the database (`make db-dev`):
+When a query returns no rows, `assistant.diagnose` drops one filter at a time to find the one that
+removed every row. Try the layers (the last three need the database):
 
 ```bash
+uv run python -m assistant.guard "SELECT pg_sleep(10)"      # blocked: function_not_allowed
 uv run python -m assistant.executor "SELECT name, status FROM suppliers ORDER BY name LIMIT 5"
 uv run python -m assistant.executor "SELECT COUNT(*) FROM shopping_cart_items AS a CROSS JOIN shopping_cart_items AS b"   # cost_limit
 uv run python -m assistant.diagnose "SELECT cart_id FROM shopping_carts WHERE status = 'completed' AND created_at >= '2030-01-01'"
@@ -87,21 +56,42 @@ uv run python -m assistant.diagnose "SELECT cart_id FROM shopping_carts WHERE st
 ```bash
 uv sync                                  # create the environment
 uv run pre-commit install                # install the git hooks (once per clone)
-uv run pytest -q -m "not integration"    # unit tests, no database, no API key
-make db-dev                              # db with a loopback port 127.0.0.1:55432 (compose.dev.yml)
-uv run pytest -q -m integration          # integration tests against that db, as app_ro
-make dump                                # rebuild the data, the dump and data/fingerprint.json
-uv run pre-commit run --all-files        # every check, as CI runs them
+uv run pytest -q -m "not integration"    # unit and security tests, no database, no API key
+uv run pytest -q -m integration          # executor, diagnostic and role tests (needs the db)
+uv run pre-commit run --all-files        # whitespace, secrets, Ruff
+make dump                                # regenerate the data dump in a throwaway container
 ```
 
-## Repository layout
+Settings come from environment variables (see `.env.example`); use `uv run --env-file .env ...`
+when a command needs the API key.
+
+## Map of the repo
 
 ```text
-src/assistant/   application package
-data/            init/ (dump and role script loaded by the db container), fingerprint.json
-scripts/         data generator, freeze and one-off parity check
-config/          model prices (pricing.toml)
+src/assistant/
+  config.py        settings from the environment, model prices and the cost of a call
+  schemas.py       Pydantic contracts and the rules of each answer status
+  llm.py           the only door to OpenAI: structured calls and embeddings, traced
+  trace.py         per-request trace events, usage totals, p50/p95 latency and cost
+  guard.py         SQL guard on the parsed tree: one SELECT, allowlists, forced LIMIT
+  executor.py      read-only transaction as app_ro, timeout, EXPLAIN cost check
+  diagnose.py      zero rows: which filter removed them
+knowledge/
+  tables.md        one section per table and view
+  glossary.md      business rules that every query must follow
+config/pricing.toml  model prices (USD per 1M tokens) with their as_of date
+data/init/         the synthetic data dump and the read-only role, loaded on the db's first start
+scripts/build_db.py  the seeded generator that produced the dump
+tests/
+  unit/            no database, no API key
+  security/        guard attacks, each naming the rule that must block it
+  integration/     executor, diagnostic and role attacks against the db
+  fake_llm.py      offline stand-in for the OpenAI client
+docs/
+  PLAN.md          goal, flow and phases
+  DECISIONS.md     design decisions and why
+docker-compose.yml   the db service (127.0.0.1:55432)
+Makefile         `make dump`
+.github/workflows/ci.yml  Ruff and unit tests on every push
 var/             runtime output, git-ignored (traces/*.jsonl)
-tests/           unit/ (no DB, no key), integration/ (needs the db), security/
-docs/            plan, log, data model, golden-set guide
 ```
