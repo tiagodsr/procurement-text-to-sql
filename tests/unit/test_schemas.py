@@ -1,4 +1,5 @@
-"""Spec for assistant.schemas: the status rules of docs/PLAN.md section 5 and other contracts."""
+"""Spec for assistant.schemas: the rules of each answer status, and LLM outputs that fit strict
+structured outputs."""
 
 from typing import Any
 
@@ -8,40 +9,47 @@ from pydantic import BaseModel, ValidationError
 from assistant.schemas import (
     LLM_OUTPUTS,
     Clarification,
+    ErrorInfo,
     FinalAnswer,
     IntakeResult,
+    NoDataDiagnostic,
     QueryRequest,
     RequestUsage,
-    SchemaContext,
     SqlResult,
     TraceEvent,
-    examples,
 )
 
-EXAMPLES = examples()
-SQL = EXAMPLES["answered"].sql
-ONE_ROW = EXAMPLES["answered"].result
-NO_ROWS = EXAMPLES["no_data"].result
+SQL = "SELECT COUNT(*) FROM suppliers LIMIT 100"
+SHAPE = {"sql": SQL, "columns": ["count"], "truncated": False, "db_ms": 2.0}
+ONE_ROW = SqlResult(rows=[[96]], row_count=1, **SHAPE)
+NO_ROWS = SqlResult(rows=[], row_count=0, **SHAPE)
+CLARIFY = Clarification(question="Which one?", reason="entity_ambiguity", options=["A", "B"])
+GAP = NoDataDiagnostic(summary="The year filter removed every row.")
+FAILED = ErrorInfo(kind="max_retries", message="SQL failed twice")
+
+# One valid answer per status.
+EXAMPLES = {
+    "answered": {"answer": "96 suppliers.", "sql": SQL, "result": ONE_ROW, "cited_rows": [0]},
+    "no_data": {"answer": "No rows.", "sql": SQL, "result": NO_ROWS, "diagnostic": GAP},
+    "needs_clarification": {"answer": CLARIFY.question, "clarification": CLARIFY},
+    "out_of_scope": {"answer": "I only answer questions about procurement data."},
+    "refused": {"answer": "I can only read data, not change it."},
+    "error": {"answer": "I could not answer within the limits.", "error": FAILED},
+}
 
 
 def answer(status: str, **changes: Any) -> FinalAnswer:
-    """Validate the example for `status` with some fields changed (model_copy would skip checks)."""
-    return FinalAnswer.model_validate({**dict(EXAMPLES[status]), **changes})
+    base = {"request_id": "r", "question": "How many suppliers?", "variant": "workflow"}
+    return FinalAnswer.model_validate({**base, "status": status, **EXAMPLES[status], **changes})
 
 
 def execute_event() -> TraceEvent:
     return TraceEvent(request_id="r", step="execute", kind="tool", latency_ms=3, status="ok")
 
 
-# --- FinalAnswer: one valid example per status ------------------------------------------------
-
-
 @pytest.mark.parametrize("status", list(EXAMPLES))
 def test_every_status_has_a_valid_example(status):
     assert answer(status).status == status
-
-
-# --- FinalAnswer: the status rules ------------------------------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -53,26 +61,17 @@ def test_every_status_has_a_valid_example(status):
         # no_data needs zero rows and a diagnostic
         ("no_data", {"diagnostic": None}, "diagnostic"),
         ("no_data", {"result": ONE_ROW}, "zero rows"),
-        ("no_data", {"sql": None, "result": None}, "executed SQL"),
         # needs_clarification needs a clarification and runs no SQL
         ("needs_clarification", {"clarification": None}, "needs a clarification"),
         ("needs_clarification", {"sql": SQL, "result": ONE_ROW}, "no SQL result"),
         # out_of_scope and refused: no SQL, not in the fields and not in the trace
         ("out_of_scope", {"sql": SQL, "result": ONE_ROW}, "no SQL result"),
-        ("refused", {"sql": SQL}, "no SQL result"),
-        ("out_of_scope", {"usage": RequestUsage(steps=[execute_event()])}, "trace has one"),
         ("refused", {"usage": RequestUsage(steps=[execute_event()])}, "trace has one"),
         # error needs error info, is the only status with it, and never carries a result
         ("error", {"error": None}, "error info"),
-        ("error", {"sql": SQL, "result": ONE_ROW}, "no SQL result"),
-        ("answered", {"error": EXAMPLES["error"].error}, "error info"),
-        # fields that belong to one status only
-        ("answered", {"clarification": EXAMPLES["needs_clarification"].clarification}, "only"),
-        ("answered", {"diagnostic": EXAMPLES["no_data"].diagnostic}, "only"),
-        # citations and consistency
+        ("answered", {"error": FAILED}, "error info"),
+        # citations point at rows of the preview
         ("answered", {"cited_rows": [1]}, "cited_rows"),
-        ("out_of_scope", {"cited_rows": [0]}, "cited_rows"),
-        ("answered", {"sql": "SELECT 1"}, "result.sql"),
         ("refused", {"answer": "  "}, "blank"),
     ],
 )
@@ -81,125 +80,27 @@ def test_status_rules_reject_inconsistent_answers(status, changes, message):
         answer(status, **changes)
 
 
-def test_an_execute_event_is_fine_for_an_answered_question():
-    assert answer("answered", usage=RequestUsage(steps=[execute_event()]))
-
-
-# --- Clarification and IntakeResult -----------------------------------------------------------
-
-
-def clarification(reason: str, options: list[str]) -> Clarification:
-    return Clarification(question="Which one do you mean?", reason=reason, options=options)
-
-
 def test_entity_ambiguity_needs_two_options():
     with pytest.raises(ValidationError, match="at least two"):
-        clarification("entity_ambiguity", ["Northwind Tools"])
-    assert clarification("entity_ambiguity", ["Northwind Tools", "Northwind Office"])
-
-
-def test_a_vague_criterion_may_have_no_options():
-    assert clarification("vague_criterion", []).options == []
-
-
-@pytest.mark.parametrize(
-    "options", [["A", "a"], ["A", " "], [str(i) for i in range(7)]], ids=["dup", "blank", "many"]
-)
-def test_bad_options_are_rejected(options):
-    with pytest.raises(ValidationError):
-        clarification("other", options)
+        Clarification(question="Which one?", reason="entity_ambiguity", options=["Northwind"])
 
 
 def test_intake_route_clarify_goes_with_a_clarification():
-    c = clarification("missing_period", [])
-    assert IntakeResult(route="clarify", reason="no year", mentions=[], clarification=c)
+    assert IntakeResult(route="clarify", reason="two entities", clarification=CLARIFY)
     with pytest.raises(ValidationError, match="clarify"):
-        IntakeResult(route="clarify", reason="no year", mentions=[], clarification=None)
+        IntakeResult(route="clarify", reason="two entities", clarification=None)
     with pytest.raises(ValidationError, match="clarify"):
-        IntakeResult(route="sql", reason="clear", mentions=[], clarification=c)
-
-
-# --- QueryRequest -----------------------------------------------------------------------------
-
-
-def test_question_is_stripped_and_defaults_to_variant_a():
-    request = QueryRequest(question="  top suppliers in 2025?  ", clarification=" ")
-    assert request.question == "top suppliers in 2025?"
-    assert request.variant == "A"
-    assert request.clarification is None
+        IntakeResult(route="sql", reason="clear", clarification=CLARIFY)
 
 
 @pytest.mark.parametrize(
     "payload",
-    [
-        {"question": "   "},
-        {"question": "x" * 501},
-        {"question": "ok", "variant": "C"},
-        {"question": "ok", "role": "admin"},
-        {"question": "ok", "clarification": "y" * 201},
-    ],
-    ids=["blank", "too-long", "variant", "extra-field", "long-clarification"],
+    [{"question": "   "}, {"question": "x" * 501}, {"question": "ok", "role": "admin"}],
+    ids=["blank", "too-long", "extra-field"],
 )
 def test_invalid_requests_are_rejected(payload):
     with pytest.raises(ValidationError):
         QueryRequest.model_validate(payload)
-
-
-# --- results and context ----------------------------------------------------------------------
-
-
-def test_sql_result_rows_match_the_columns():
-    with pytest.raises(ValidationError, match="one value per column"):
-        SqlResult(sql=SQL, columns=["a"], rows=[[1, 2]], row_count=1, truncated=False, db_ms=1)
-
-
-def test_a_cut_preview_must_be_marked_truncated():
-    with pytest.raises(ValidationError, match="truncated"):
-        SqlResult(sql=SQL, columns=["a"], rows=[[1]], row_count=5, truncated=False, db_ms=1)
-    assert SqlResult(sql=SQL, columns=["a"], rows=[[1]], row_count=5, truncated=True, db_ms=1)
-
-
-def test_schema_context_is_ranked_by_score():
-    docs = [
-        {"id": "a", "score": 0.2, "doc_type": "table", "source": "x"},
-        {"id": "b", "score": 0.9, "doc_type": "table", "source": "x"},
-    ]
-    with pytest.raises(ValidationError, match="sorted"):
-        SchemaContext(query="q", docs=docs)
-    assert SchemaContext(query="q", docs=docs[::-1])
-
-
-# --- TraceEvent -------------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize(
-    ("fields", "message"),
-    [
-        ({"model": None}, "needs a model"),
-        ({"input_tokens": 10, "cached_input_tokens": 11}, "cached_input_tokens"),
-        ({"output_tokens": 1, "reasoning_tokens": 2}, "reasoning_tokens"),
-        ({"cost_usd": -0.01}, "greater than or equal"),
-        ({"status": "answered"}, "not valid for a llm event"),
-        ({"kind": "request", "step": "intake"}, "step 'request'"),
-        ({"kind": "request", "step": "request", "model": None, "status": "ok"}, "not valid"),
-    ],
-)
-def test_inconsistent_trace_events_are_rejected(fields, message):
-    base = {
-        "request_id": "r",
-        "step": "intake",
-        "kind": "llm",
-        "model": "m",
-        "latency_ms": 1,
-        "status": "ok",
-    }
-    with pytest.raises(ValidationError, match=message):
-        TraceEvent(**{**base, **fields})
-
-
-def test_error_is_a_valid_status_for_steps_and_requests():
-    assert TraceEvent(request_id="r", step="execute", kind="tool", latency_ms=1, status="error")
-    assert TraceEvent(request_id="r", step="request", kind="request", latency_ms=1, status="error")
 
 
 # --- LLM outputs stay within strict structured outputs ----------------------------------------

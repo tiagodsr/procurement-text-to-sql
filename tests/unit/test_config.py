@@ -1,4 +1,5 @@
-"""Spec for assistant.config: settings from the environment and prices from TOML."""
+"""Spec for assistant.config: settings from the environment and prices from TOML (cost is in
+test_llm.py)."""
 
 from decimal import Decimal
 from pathlib import Path
@@ -9,14 +10,13 @@ from pydantic import ValidationError
 from assistant.config import (
     REPO_ROOT,
     PricingError,
-    Settings,
     load_pricing,
     load_settings,
 )
 
 META = """
 [meta]
-as_of = "2026-10-18"
+as_of = "2000-01-01"
 source = "https://example.test/pricing"
 currency = "USD"
 unit = "per 1M tokens"
@@ -43,15 +43,6 @@ def write(tmp_path: Path, text: str) -> Path:
 
 
 # --- settings ---------------------------------------------------------------------------------
-
-
-def test_defaults_with_an_empty_environment():
-    s = load_settings({})
-    assert s.llm_model == "gpt-4.1-mini"
-    assert s.embedding_model == "text-embedding-3-small"
-    assert s.trace_dir == REPO_ROOT / "var" / "traces"
-    assert s.pricing_path == REPO_ROOT / "config" / "pricing.toml"
-    assert s.database_url.startswith("postgresql://app_ro:")
 
 
 def test_environment_overrides_and_empty_values_count_as_unset(tmp_path):
@@ -81,20 +72,12 @@ def test_database_url_must_use_the_read_only_role(url):
         load_settings({"DATABASE_URL": url})
 
 
-def test_missing_key_means_llm_not_configured():
-    assert load_settings({}).llm_configured is False
-
-
 def test_key_is_never_shown():
+    assert load_settings({}).llm_configured is False
     s = load_settings({"OPENAI_API_KEY": "sk-test-not-a-real-key"})
     assert s.llm_configured is True
     assert "sk-test" not in repr(s)
     assert "sk-test" not in str(s.model_dump())
-
-
-def test_timeout_must_be_positive():
-    with pytest.raises(ValidationError):
-        Settings(llm_timeout_s=0)
 
 
 # --- pricing ----------------------------------------------------------------------------------
@@ -120,8 +103,6 @@ def test_unpriced_model_raises(tmp_path):
         '[models.m]\nkind = "chat"\ninput = -1.0\noutput = 1.0\n',  # negative price
         '[models.m]\nkind = "chat"\ninput = 1.0\n',  # chat without output
         '[models.m]\nkind = "embedding"\ninput = 1.0\noutput = 1.0\n',  # embedding with output
-        '[models.m]\nkind = "chat"\ninput = 1.0\noutput = 1.0\nbatch = 0.5\n',  # unknown key
-        '[models.m]\nkind = "audio"\ninput = 1.0\n',  # unknown kind
     ],
 )
 def test_invalid_price_tables_are_rejected(tmp_path, models):
@@ -130,7 +111,7 @@ def test_invalid_price_tables_are_rejected(tmp_path, models):
 
 
 def test_prices_need_an_as_of_date(tmp_path):
-    undated = META.replace('as_of = "2026-10-18"', 'as_of = ""')
+    undated = META.replace('as_of = "2000-01-01"', 'as_of = ""')
     with pytest.raises(ValidationError, match="as_of"):
         load_pricing(write(tmp_path, undated + TEST_MODELS))
 

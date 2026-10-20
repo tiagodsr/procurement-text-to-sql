@@ -1,4 +1,4 @@
-"""Offline stand-in for the OpenAI client, for tests and demos. It never touches the network.
+"""Offline stand-in for the OpenAI client, for tests. It never touches the network.
 
 Replies are built with the SDK's own response types, so a shape the real client would not return
 fails here too. A FakeClock lets each reply take an exact number of seconds.

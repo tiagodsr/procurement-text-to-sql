@@ -1,12 +1,7 @@
-"""Trace events as JSONL: record them per request, read them back, summarise p50/p95.
-
-Demo:
-    python -m assistant.trace var/traces/2026-10-18.jsonl [more.jsonl ...]
-"""
+"""Trace events as JSONL: record them per request, read them back, summarise p50/p95."""
 
 from __future__ import annotations
 
-import argparse
 import math
 import threading
 import uuid
@@ -146,15 +141,3 @@ def format_summary(summary: Summary) -> str:
     lines = [header, row("per request", summary.requests)]
     lines += [row(step, stats) for step, stats in summary.steps.items()]
     return "\n".join(lines)
-
-
-def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("paths", nargs="+", type=Path, help="JSONL trace files")
-    args = parser.parse_args()
-    events = [event for path in args.paths for event in read_events(path)]
-    print(format_summary(summarize(events)))
-
-
-if __name__ == "__main__":
-    main()
