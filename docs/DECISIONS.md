@@ -85,6 +85,13 @@ subqueries are not split.
   `GET /health` answers either way and says `llm_configured` and `database`. The page reads it to
   warn before anyone asks.
 
+- **The page is a client of the API, nothing more.** It validates the response with the same
+  `FinalAnswer` model, so a changed contract fails loudly instead of showing half an answer. It
+  keeps no workflow logic: the clarification buttons send the chosen option as `clarification`, as
+  any API client would. It is tested offline with Streamlit's `AppTest` against a fake API.
+- **No empty table.** For `no_data` the page shows the per-filter diagnostic instead of the empty
+  rows, because a table with a header and no rows looks like a broken page.
+
 ## LLM calls
 
 - **One door.** Every call goes through `llm.py`, which records model, tokens, latency and cost as a

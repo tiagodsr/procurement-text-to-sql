@@ -42,6 +42,18 @@ spent so far). A missing `OPENAI_API_KEY` is `503` and an invalid request is `42
 `GET /health` always answers while the API is up and says what a question needs:
 `{"status": "ok", "llm_configured": true, "database": true}`.
 
+## The page
+
+```bash
+uv run streamlit run src/assistant/ui.py              # http://localhost:8501, the API must be up
+```
+
+One page over HTTP (`API_URL`, default `http://127.0.0.1:8000`). It shows what the API returns: the
+status, the answer, cost and latency, the SQL, the rows (cited ones marked), the evidence and the
+trace. A clarification is answered with one button per option. Rows are not shown when there are
+none (`no_data` shows which filter removed them instead). A warning appears, and Ask is disabled,
+when the API is not reachable, has no `OPENAI_API_KEY` or cannot reach the database.
+
 ## How a question is answered
 
 ```text
@@ -132,7 +144,7 @@ uv run python -m assistant.diagnose "SELECT cart_id FROM shopping_carts WHERE st
 ```bash
 uv sync                                  # create the environment
 uv run pre-commit install                # install the git hooks (once per clone)
-uv run pytest -q -m "not integration"    # unit, API and security tests: no database, no API key
+uv run pytest -q -m "not integration"    # unit, API, page and security tests: no database, no API key
 uv run pytest -q -m integration          # executor, diagnostic and role tests (needs the db)
 uv run pre-commit run --all-files        # whitespace, secrets, Ruff
 make dump                                # regenerate the data dump in a throwaway container
@@ -147,6 +159,7 @@ when a command needs the API key.
 src/assistant/
   cli.py           `ask`: one question in the terminal, with SQL, rows and trace
   api.py           FastAPI: `GET /health` and `POST /v1/query`
+  ui.py            the Streamlit page, which asks the API over HTTP
   workflow.py      the fixed workflow and its exits for every status
   retrieve.py      semantic search: documents, committed vectors, cosine, recall
   prompts.py       builds each step's instructions from prompts/ and knowledge/
