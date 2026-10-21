@@ -73,6 +73,36 @@ subqueries are not split.
 - **Supplier matching never joins aliases into lines.** Some suppliers have two aliases, so a join
   counts their lines twice; the prompt and `tables.md` ask for `supplier_id IN (...)`.
 
+## Evaluation
+
+- **The baseline is naive text-to-SQL.** One call with `prompts/baseline.md` and the whole of
+  `tables.md`, no glossary, no examples, no intake, no repair and no explanation; its answer is
+  written by code ("The query returned N rows."). It runs as `answer(..., variant="baseline")`, so
+  its SQL still goes through the guard and the read-only executor: the comparison measures what
+  the workflow's steps add, not what the safety layers add.
+- **Expected rows come from a reference query, not from a hand.** Each answered case holds its
+  `reference_sql` and the rows it returned (`expected_rows`); an integration test reruns every
+  reference through the guard and the executor and must get the same rows.
+- **Traps are checked a second way.** A trap case (cancelled carts, a foreign currency) also has a
+  `check_sql` that computes the answer from the raw tables (`shopping_carts`,
+  `shopping_cart_items`, `exchange_rates`) instead of `v_completed_lines`, and must match. The naive
+  query is far off (52.5 M instead of 13.5 M EUR for the 2024 total), so the trap is real.
+- **Execution accuracy compares rows, loosely where it is safe.** The result must have the same
+  number of rows as the expected result, and each expected row must sit inside its own result row:
+  extra columns and any row order are fine, numbers match within 0.1% or 0.05 (rounding; the view
+  rounds each line to cents), text matches without case. Expected rows hold only what the question
+  asks (the amount for "which site", not the site's name or city, since either is a correct way to
+  name it). Only cases with expected rows are scored on rows; every case is scored on status.
+- **Unsafe means the database was reached.** "Unsafe questions with SQL executed" counts unsafe
+  cases whose trace has a successful `execute`; it must be 0 for the workflow. Writes the guard
+  blocked are counted separately from the guard event's rule.
+- **The estimate is a ceiling.** Before any call the runner prices every planned call at its
+  output limit and its full instructions (characters / 4 for input tokens; the SQL step with every
+  table doc and example), and asks. Repairs are not in it; the prompt says so.
+- **The holdout runs once, whole.** `--split holdout` refuses to run when its report exists or with
+  `--max-cases`; `make recall` reads development cases only. A partial run prints its report
+  without writing it.
+
 ## Demo surface
 
 - **The API returns the workflow's answer as it is.** `POST /v1/query` responds with the

@@ -1,6 +1,7 @@
 """The fixed workflow: intake -> semantic search -> SQL -> guard -> read-only execute (repair up to
 twice) -> explain, with exits for clarification, no data, out of scope, refusal and errors. Every
-step is traced."""
+step is traced. The baseline variant (for the evaluation) is one SQL call over the whole schema,
+then the same guard and read-only execution."""
 
 from __future__ import annotations
 
@@ -27,11 +28,13 @@ from assistant.schemas import (
     GeneratedSQL,
     GuardViolation,
     IntakeResult,
+    NoDataDiagnostic,
     QueryRequest,
     RetrievedDoc,
     SqlError,
     SqlResult,
     Step,
+    Variant,
 )
 from assistant.trace import Tracer
 
@@ -75,13 +78,21 @@ def _error(kind: str, message: str) -> _Exit:
     return _Exit("error", answer, error=ErrorInfo(kind=kind, message=message))
 
 
-def answer(request: QueryRequest, deps: Deps, tracer: Tracer | None = None) -> FinalAnswer:
-    """Run the workflow for one request; always returns a FinalAnswer."""
-    tracer = tracer or Tracer(deps.settings.trace_dir, variant="workflow")
+def answer(
+    request: QueryRequest,
+    deps: Deps,
+    tracer: Tracer | None = None,
+    variant: Variant = "workflow",
+) -> FinalAnswer:
+    """Run the workflow (or the baseline) for one request; always returns a FinalAnswer."""
+    tracer = tracer or Tracer(deps.settings.trace_dir, variant=variant)
     started = deps.clock()
     evidence: list[RetrievedDoc] = []  # filled by the search step, kept whatever the exit
     try:
-        fields = _run(request, deps, tracer, evidence)
+        if variant == "baseline":
+            fields = _run_baseline(request, deps, tracer)
+        else:
+            fields = _run(request, deps, tracer, evidence)
     except _Exit as exit_:
         fields = exit_.fields
     except (LLMUnavailable, DatabaseUnavailable) as exc:
@@ -92,7 +103,7 @@ def answer(request: QueryRequest, deps: Deps, tracer: Tracer | None = None) -> F
     return FinalAnswer(
         request_id=tracer.request_id,
         question=request.question,
-        variant="workflow",
+        variant=variant,
         evidence=evidence,
         usage=tracer.usage(),
         **fields,
@@ -159,6 +170,21 @@ def _run(
     }
 
 
+def _run_baseline(request: QueryRequest, deps: Deps, tracer: Tracer) -> dict[str, Any]:
+    """One SQL call with the whole schema and no glossary: no intake, search, repair or explain.
+    The SQL still goes through the guard and the read-only executor."""
+    asked = _user_input(request)
+    query = _llm(deps, tracer, "generate_sql", prompts.baseline(), asked, GeneratedSQL)
+    outcome = _guard_and_run(query.sql, deps, tracer)
+    if not isinstance(outcome, SqlResult):
+        raise _error("max_retries", f"the baseline does not repair: {_describe(outcome)}")
+    done = {"sql": outcome.sql, "result": outcome, "assumptions": query.assumptions}
+    if outcome.empty:
+        diagnostic = NoDataDiagnostic(summary="The query returned no rows.")
+        return {"status": "no_data", "answer": diagnostic.summary, "diagnostic": diagnostic, **done}
+    return {"status": "answered", "answer": f"The query returned {outcome.row_count} rows.", **done}
+
+
 def _llm[T: BaseModel](
     deps: Deps, tracer: Tracer, step: Step, instructions: str, input: str, output_type: type[T]
 ) -> T:
@@ -214,6 +240,7 @@ def _guard_and_run(sql: str, deps: Deps, tracer: Tracer) -> SqlResult | SqlError
             status="blocked",
             sql=sql,
             error=_describe(guarded),
+            detail={"rule": guarded.rule},
         )
         if guarded.rule in UNSAFE_RULES:
             raise _Exit("refused", REFUSED)

@@ -80,6 +80,5 @@ make dump                                # rebuild the data dump (throwaway cont
 uv run --env-file .env ask "<question>"  # one question end to end (db + API key)
 make index                               # re-embed knowledge/tables.md and examples.md
 make recall                              # recall@3 on the development questions
+make eval                                # golden set, workflow vs baseline (asks before spending)
 ```
-
-The command for `make eval` is added in the phase that creates it.

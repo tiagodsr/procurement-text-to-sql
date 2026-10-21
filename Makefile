@@ -27,3 +27,10 @@ index:  ## re-embed tables.md and examples.md into knowledge/index.json
 
 recall:  ## recall@3 of the table docs on the development questions
 	uv run --env-file .env python -m assistant.retrieve recall
+
+.PHONY: eval
+
+# The golden set through the workflow and the baseline (assistant.evaluate). Needs the db and the
+# API key; prints a cost estimate and asks before spending.
+eval:  ## dev split, both variants; writes evals/report-dev.md
+	uv run --env-file .env python -m assistant.evaluate --split dev
