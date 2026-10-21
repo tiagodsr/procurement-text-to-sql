@@ -194,7 +194,8 @@ knowledge/
   glossary.md      business rules that every query must follow, with the sister brands
   examples.md      example questions with a correct query, for the SQL step
   index.json       the committed vectors of tables.md and examples.md (`make index`)
-evals/cases.json   the development questions, with the docs each needs
+evals/cases.json   the golden set: 12 development and 4 holdout questions, with the docs each
+                   needs and, for answers, the reference SQL and its rows
 config/pricing.toml  model prices (USD per 1M tokens) with their as_of date
 data/init/         the synthetic data dump and the read-only role, loaded on the db's first start
 scripts/build_db.py  the seeded generator that produced the dump

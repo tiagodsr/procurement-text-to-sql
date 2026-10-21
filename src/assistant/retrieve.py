@@ -133,7 +133,8 @@ def main() -> None:
         print(f"{len(docs)} documents embedded into {INDEX_PATH.relative_to(REPO_ROOT)}")
     else:
         index = load_index(settings.embedding_model)
-        cases = [c for c in json.loads(CASES_PATH.read_text("utf-8")) if c["expected_docs"]]
+        cases = json.loads(CASES_PATH.read_text("utf-8"))
+        cases = [c for c in cases if c["split"] == "dev" and c["expected_docs"]]  # never holdout
         vectors = embed(client, [c["question"] for c in cases], **options)
         for k in sorted({RECALL_AT, TOP_TABLES}):
             scores = recall(index, cases, vectors, k)
