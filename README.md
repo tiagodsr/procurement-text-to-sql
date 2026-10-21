@@ -114,6 +114,21 @@ The prompts are in [prompts/](prompts/). The question, the clarification, databa
 only ever go in the `input` of a call; the `instructions` are built from the prompts and
 `knowledge/` alone.
 
+## Evaluation
+
+```bash
+make eval                                                           # dev split, both variants
+uv run --env-file .env python -m assistant.evaluate --max-cases 2    # a cheap smoke run
+uv run --env-file .env python -m assistant.evaluate --split holdout  # once, at the end
+```
+
+[evals/cases.json](evals/cases.json) holds 16 questions (12 development, 4 holdout) across simple,
+join, trap, ambiguous, no data and unsafe. Each runs through the workflow and through a baseline
+(one prompt with the whole schema and no glossary, the same guard and read-only execution). The
+report compares status accuracy, execution accuracy (the rows of a reference query), unsafe
+questions that reached the database, writes blocked by the guard, cost and latency p50/p95, and is
+written to `evals/report-<split>.md`. The runner prints a cost estimate and asks before spending.
+
 ## Requirements
 
 - [uv](https://docs.astral.sh/uv/) (installs Python 3.12 for you)
@@ -178,8 +193,9 @@ src/assistant/
   cli.py           `ask`: one question in the terminal, with SQL, rows and trace
   api.py           FastAPI: `GET /health` and `POST /v1/query`
   ui.py            the Streamlit page, which asks the API over HTTP
-  workflow.py      the fixed workflow and its exits for every status
+  workflow.py      the fixed workflow and its exits for every status, and the baseline
   retrieve.py      semantic search: documents, committed vectors, cosine, recall
+  evaluate.py      the golden set through the workflow and the baseline, with a report
   prompts.py       builds each step's instructions from prompts/ and knowledge/
   config.py        settings from the environment, model prices and the cost of a call
   schemas.py       Pydantic contracts and the rules of each answer status
@@ -209,7 +225,7 @@ docs/
   DECISIONS.md     design decisions and why
 Dockerfile       one image for the api and the ui (uv, locked dependencies)
 docker-compose.yml   db (127.0.0.1:55432), api (:8000) and ui (:8501)
-Makefile         `make dump`, `make index`, `make recall`
+Makefile         `make dump`, `make index`, `make recall`, `make eval`
 .github/workflows/ci.yml  Ruff and unit tests on every push
 var/             runtime output, git-ignored (traces/*.jsonl)
 ```
