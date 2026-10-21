@@ -188,7 +188,7 @@ src/assistant/
   guard.py         SQL guard on the parsed tree: one SELECT, allowlists, forced LIMIT
   executor.py      read-only transaction as app_ro, timeout, EXPLAIN cost check
   diagnose.py      zero rows: which filter removed them
-prompts/           intake.md, sql.md (generate and repair), explain.md
+prompts/           intake.md, sql.md (generate and repair), explain.md, baseline.md
 knowledge/
   tables.md        one section per table and view
   glossary.md      business rules that every query must follow, with the sister brands

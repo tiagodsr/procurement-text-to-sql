@@ -37,3 +37,8 @@ def sql(tables: str, examples: str) -> str:
 
 def explain() -> str:
     return render("explain", glossary=knowledge("glossary.md"))
+
+
+def baseline() -> str:
+    """The comparison point of the evaluation: one prompt with the whole schema, no glossary."""
+    return render("baseline", tables=knowledge("tables.md"))

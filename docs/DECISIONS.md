@@ -73,6 +73,14 @@ subqueries are not split.
 - **Supplier matching never joins aliases into lines.** Some suppliers have two aliases, so a join
   counts their lines twice; the prompt and `tables.md` ask for `supplier_id IN (...)`.
 
+## Evaluation
+
+- **The baseline is naive text-to-SQL.** One call with `prompts/baseline.md` and the whole of
+  `tables.md`, no glossary, no examples, no intake, no repair and no explanation; its answer is
+  written by code ("The query returned N rows."). It runs as `answer(..., variant="baseline")`, so
+  its SQL still goes through the guard and the read-only executor: the comparison measures what
+  the workflow's steps add, not what the safety layers add.
+
 ## Demo surface
 
 - **The API returns the workflow's answer as it is.** `POST /v1/query` responds with the

@@ -46,3 +46,10 @@ def test_the_glossary_lists_six_sister_brands_of_two_entities_each():
     assert len(brands) == 6
     assert all(len(entities) == 2 for entities in brands.values())
     assert brands["Velria"] == {"Velria Tools SAS", "Velria America Inc."}
+
+
+def test_the_baseline_prompt_has_the_whole_schema_and_no_glossary():
+    text = prompts.baseline()
+    assert "{{" not in text
+    assert prompts.knowledge("tables.md") in text
+    assert prompts.knowledge("glossary.md") not in text

@@ -5,6 +5,7 @@ from typing import Any
 import pytest
 from pydantic import BaseModel
 
+from assistant import prompts
 from assistant.config import Settings
 from assistant.executor import DatabaseUnavailable
 from assistant.guard import GuardedSQL
@@ -67,7 +68,14 @@ class FakeDB:
         return outcome(guarded.sql)
 
 
-def run(replies: list[Reply], db: FakeDB | None = None, *, question=QUESTION, clarification=None):
+def run(
+    replies: list[Reply],
+    db: FakeDB | None = None,
+    *,
+    question=QUESTION,
+    clarification=None,
+    variant="workflow",
+):
     client = FakeOpenAI(replies)
     db = db or FakeDB()
     deps = Deps(
@@ -79,7 +87,7 @@ def run(replies: list[Reply], db: FakeDB | None = None, *, question=QUESTION, cl
         clock=client.clock,
     )
     request = QueryRequest(question=question, clarification=clarification)
-    final = answer(request, deps, Tracer(None, variant="workflow"))
+    final = answer(request, deps, Tracer(None, variant=variant), variant=variant)
     return final, client, db
 
 
@@ -317,3 +325,47 @@ def test_an_outage_is_an_upstream_error(where):
         final, _, _ = run([reply(SQL_ROUTE), reply(QUERY)], db)
     assert (final.status, final.error.kind) == ("error", "upstream")
     assert steps(final)[-1] == "request:error"
+
+
+# --- baseline (the comparison point of the evaluation) ------------------------------------------
+
+
+def test_the_baseline_is_one_sql_call_over_the_whole_schema_with_no_glossary():
+    db = FakeDB(rows(["Alpha GmbH", 10.0]))
+    final, client, _ = run([reply(QUERY)], db, variant="baseline")
+    assert final.status == "answered"
+    assert final.variant == "baseline"
+    assert final.evidence == []
+    assert steps(final) == ["generate_sql:ok", "guard:ok", "execute:ok", "request:answered"]
+    assert [kind for kind, _ in client.calls] == ["responses"]  # no embedding
+    [instructions] = sent(client, "instructions")
+    assert prompts.knowledge("tables.md") in instructions
+    assert prompts.knowledge("glossary.md") not in instructions
+    assert QUESTION not in instructions
+
+
+def test_the_baseline_never_asks_for_clarification():
+    db = FakeDB(rows(["Brabon Packaging GmbH", 10.0]))
+    final, _, _ = run([reply(QUERY)], db, question="How much with Brabon?", variant="baseline")
+    assert final.status == "answered"
+
+
+def test_the_baseline_does_not_repair_a_failed_query():
+    db = FakeDB(failure('column "spend" does not exist'))
+    final, client, _ = run([reply(QUERY)], db, variant="baseline")
+    assert final.status == "error"
+    assert len(sent(client, "input")) == 1
+
+
+def test_a_write_from_the_baseline_is_refused_by_the_guard_before_the_database():
+    drop = GeneratedSQL(sql="UPDATE suppliers SET status = 'active'", assumptions=[])
+    db = FakeDB()
+    final, _, _ = run([reply(drop)], db, variant="baseline")
+    assert final.status == "refused"
+    assert db.ran == []
+    assert final.usage.steps[1].detail == {"rule": "write_or_ddl"}
+
+
+def test_an_empty_baseline_result_is_no_data():
+    final, _, _ = run([reply(QUERY)], FakeDB(rows()), variant="baseline")
+    assert final.status == "no_data"
